@@ -223,6 +223,53 @@ def benchmark_flash_attention(device):
 
         print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
 
+from torch import nn
+class LlamaRMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        """
+        LlamaRMSNorm is equivalent to T5LayerNorm
+        """
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
+
+def benchmark_rms_norm(device):
+    rms_norm = LlamaRMSNorm(12288)
+    rms_norm.cuda()
+    rms_norm = torch.compile(rms_norm)
+
+    x = torch.randn(1, 12288, device='cuda')
+    weight = torch.randn(12288, device='cuda')
+    bias = torch.randn(12288, device='cuda')
+
+    for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
+        primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+
+        # Create a stream for the green context
+        CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
+
+        # warmup
+        rms_norm(x)
+        torch.cuda.synchronize()
+
+        timings = []
+        for _ in range(5):
+            start = time.perf_counter_ns()
+            rms_norm(x)
+            torch.cuda.synchronize()
+            end = time.perf_counter_ns()
+            timings.append(end - start)
+
+        print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
+
+
 def test_multiple_streams(device):
     green_primary_ctx, green_ctx = create_green_ctx(device, 8)
     green_primary_ctx_larger, green_ctx_larger = create_green_ctx(device, 128)
@@ -250,11 +297,11 @@ def main():
     torch.cuda.init()
 
     # Initialize cublas somehow...
-    # a = torch.randn(1024, 1024).cuda()
-    # b = torch.randn(1024, 1024).cuda()
-    # torch.cuda.synchronize()
-    # torch.matmul(a, b)
-    # torch.cuda.synchronize()
+    a = torch.randn(1024, 1024).cuda()
+    b = torch.randn(1024, 1024).cuda()
+    torch.cuda.synchronize()
+    torch.matmul(a, b)
+    torch.cuda.synchronize()
 
     device = CHECK_CUDA(cuda.cuDeviceGet(0))
     context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
@@ -265,11 +312,12 @@ def main():
     # workload_smid()
 
     # try create two streams for the same green context, and dispatch the workload to them
-    test_multiple_streams(device)
+    # test_multiple_streams(device)
 
 
-    # benchmark_matmul(device)
-    # benchmark_flash_attention(device)
+    benchmark_matmul(device)
+    benchmark_flash_attention(device)
+    benchmark_rms_norm(device)
 
     CHECK_CUDA(cuda.cuCtxDestroy(context))
 
