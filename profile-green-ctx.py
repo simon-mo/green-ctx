@@ -63,14 +63,14 @@ def compile_kernel():
     return CHECK_CUDA(cuda.cuModuleGetFunction(module, b"write_smid"))
 
 # Launch SMID kernel
-def launch_smid(h_sm_ids, num_sm):
+def launch_smid(h_sm_ids, num_sm, stream=None):
     bytes_size = num_sm * ctypes.sizeof(ctypes.c_int)
 
     # Allocate device memory
     d_sm_ids = CHECK_CUDA(cuda.cuMemAlloc(bytes_size))
 
     # Copy input data to device
-    CHECK_CUDA(cuda.cuMemcpyHtoD(d_sm_ids, h_sm_ids.ctypes.data, bytes_size))
+    CHECK_CUDA(cuda.cuMemcpyHtoDAsync(d_sm_ids, h_sm_ids.ctypes.data, bytes_size, stream))
 
     # Launch kernel
     threads_per_block = 1
@@ -93,13 +93,13 @@ def launch_smid(h_sm_ids, num_sm):
         1,  # block y dim
         1,  # block z dim
         0,  # dynamic shared memory
-        None,  # stream (using default stream)
+        stream,  # stream (using default stream)
         args.ctypes.data,  # kernel arguments
         0  # extra (ignore)
     ))
 
     # Copy result back to host
-    CHECK_CUDA(cuda.cuMemcpyDtoH(h_sm_ids.ctypes.data, d_sm_ids, bytes_size))
+    CHECK_CUDA(cuda.cuMemcpyDtoHAsync(h_sm_ids.ctypes.data, d_sm_ids, bytes_size, stream))
 
     # Free device memory
     CHECK_CUDA(cuda.cuMemFree(d_sm_ids))
@@ -134,12 +134,14 @@ def workload_smid():
 
     print(f"Launch {num_sm} SMs")
 
-    launch_smid(h_sm_ids, num_sm)
+    launch_smid(h_sm_ids, num_sm, stream=None)
 
     # Sort SM IDs
-    h_sm_ids.sort()
+    # h_sm_ids.sort()
+    from collections import Counter
+    print(Counter(sorted(h_sm_ids)))
 
-    print(" ".join(map(str, h_sm_ids)))
+    # print(" ".join(map(str, h_sm_ids)))
 
 import time
 
@@ -185,8 +187,8 @@ def benchmark_matmul(device):
 
         print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
 
-from flash_attn import flash_attn_with_kvcache
 def benchmark_flash_attention(device):
+    from flash_attn import flash_attn_with_kvcache
     batch_size = 1
     seqlen = 4095
     nheads = 32
@@ -221,28 +223,55 @@ def benchmark_flash_attention(device):
 
         print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
 
+def test_multiple_streams(device):
+    green_primary_ctx, green_ctx = create_green_ctx(device, 8)
+    green_primary_ctx_larger, green_ctx_larger = create_green_ctx(device, 128)
+
+    CHECK_CUDA(cuda.cuCtxSetCurrent(green_primary_ctx))
+
+    stream1 = CHECK_CUDA(cuda.cuGreenCtxStreamCreate(green_ctx, cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
+    stream2 = CHECK_CUDA(cuda.cuGreenCtxStreamCreate(green_ctx_larger, cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
+
+    h_sm_ids_stream_1 = np.zeros(200, dtype=np.int32)
+    h_sm_ids_stream_2 = np.zeros(200, dtype=np.int32)
+
+    launch_smid(h_sm_ids_stream_1, 200, stream=stream1)
+    launch_smid(h_sm_ids_stream_2, 200, stream=stream2)
+
+    torch.cuda.synchronize()
+
+    from collections import Counter
+    print(Counter(sorted(h_sm_ids_stream_1)))
+    print(Counter(sorted(h_sm_ids_stream_2)))
+
 
 def main():
     # CHECK_CUDA(cuda.cuInit(0))
     torch.cuda.init()
 
-    a = torch.randn(1024, 1024).cuda()
-    b = torch.randn(1024, 1024).cuda()
-    torch.cuda.synchronize()
-    torch.matmul(a, b)
-    torch.cuda.synchronize()
+    # Initialize cublas somehow...
+    # a = torch.randn(1024, 1024).cuda()
+    # b = torch.randn(1024, 1024).cuda()
+    # torch.cuda.synchronize()
+    # torch.matmul(a, b)
+    # torch.cuda.synchronize()
 
     device = CHECK_CUDA(cuda.cuDeviceGet(0))
-    # context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
+    context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
+    CHECK_CUDA(cuda.cuCtxSetCurrent(context))
 
-    # green_ctx_ctx = create_green_ctx(device, 1)
-    # CHECK_CUDA(cuda.cuCtxSetCurrent(green_ctx_ctx))
+    # green_primary_ctx, green_ctx = create_green_ctx(device, 8)
+    # CHECK_CUDA(cuda.cuCtxSetCurrent(green_primary_ctx))
     # workload_smid()
 
-    # benchmark_matmul(device)
-    benchmark_flash_attention(device)
+    # try create two streams for the same green context, and dispatch the workload to them
+    test_multiple_streams(device)
 
-    # CHECK_CUDA(cuda.cuCtxDestroy(context))
+
+    # benchmark_matmul(device)
+    # benchmark_flash_attention(device)
+
+    CHECK_CUDA(cuda.cuCtxDestroy(context))
 
 if __name__ == "__main__":
     main()
