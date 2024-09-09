@@ -25,6 +25,29 @@ def CHECK_CUDA(result):
     else:
         return result[1:]
 
+def cuda_timing_decorator(func):
+    def wrapper(*args, **kwargs):
+        # Create start and stop events for timing
+        start_event = torch.cuda.Event(enable_timing=True)
+        stop_event = torch.cuda.Event(enable_timing=True)
+
+        # Record the start event
+        start_event.record()
+
+        # Execute the function (e.g., a kernel or operation)
+        func(*args, **kwargs)
+
+        # Record the stop event and synchronize
+        stop_event.record()
+        torch.cuda.synchronize()
+
+        # Measure elapsed time
+        milliseconds = start_event.elapsed_time(stop_event)
+
+        return milliseconds
+    
+    return wrapper
+
 # Define CUDA kernel
 kernel_code = """
 __device__ unsigned int __smid(void) {
@@ -143,22 +166,22 @@ def workload_smid():
 
     # print(" ".join(map(str, h_sm_ids)))
 
-import time
 
 def benchmark_matmul(device):
-    a = torch.randn(14336, 4096).cuda()
+    a = torch.randn(14336, 4096, dtype=torch.bfloat16).cuda()
     # b = torch.randn(4096, 4096).cuda() # prefill size
-    b = torch.randn(4096, 8).cuda() # prefill size
+    b = torch.randn(4096, 8, dtype=torch.bfloat16).cuda() # prefill size
     torch.cuda.synchronize()
+
+    @cuda_timing_decorator
+    def time_matmul():
+        torch.matmul(a, b)
 
     for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
         primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
 
         # Create a stream for the green context
         CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
-
-        torch.matmul(a, b)
-        torch.cuda.synchronize()
 
         # blas_handle = torch.cuda.current_blas_handle()
         # blas_handle.cublasSetSmCountTarget(sm_cnt)
@@ -173,19 +196,15 @@ def benchmark_matmul(device):
         # with torch.cuda.stream(torch_stream):
 
         # warmup
-        for i in range(3):
-            c = torch.matmul(a, b)
-            torch.cuda.synchronize()
+        for _ in range(3):
+            time_matmul()
 
         timings = []
         for _ in range(5):
-            start = time.perf_counter_ns()
-            c = torch.matmul(a, b)
-            torch.cuda.synchronize()
-            end = time.perf_counter_ns()
-            timings.append(end - start)
+            milliseconds = time_matmul()
+            timings.append(milliseconds)
 
-        print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
+        print(f"SM count: {sm_cnt}, Time: {np.mean(timings)} ms")
 
 def benchmark_flash_attention(device):
     from flash_attn import flash_attn_with_kvcache
@@ -199,9 +218,9 @@ def benchmark_flash_attention(device):
     k_cache = torch.randn(batch_size, seqlen, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
     v_cache = torch.randn(batch_size, seqlen, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
 
-    # test
-    flash_attn_with_kvcache(q, k_cache, v_cache)
-    torch.cuda.synchronize()
+    @cuda_timing_decorator
+    def time_flash_attn():
+        flash_attn_with_kvcache(q, k_cache, v_cache)
 
     for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
         primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
@@ -210,18 +229,14 @@ def benchmark_flash_attention(device):
         CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
 
         # warmup
-        flash_attn_with_kvcache(q, k_cache, v_cache)
-        torch.cuda.synchronize()
+        time_flash_attn()
 
         timings = []
         for _ in range(5):
-            start = time.perf_counter_ns()
-            flash_attn_with_kvcache(q, k_cache, v_cache)
-            torch.cuda.synchronize()
-            end = time.perf_counter_ns()
-            timings.append(end - start)
+            milliseconds = time_flash_attn()
+            timings.append(milliseconds)
 
-        print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
+        print(f"SM count: {sm_cnt}, Time: {np.mean(timings)} ms")
 
 from torch import nn
 class LlamaRMSNorm(nn.Module):
@@ -249,6 +264,10 @@ def benchmark_rms_norm(device):
     weight = torch.randn(12288, device='cuda')
     bias = torch.randn(12288, device='cuda')
 
+    @cuda_timing_decorator
+    def time_rms_norm():
+        rms_norm(x)
+
     for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
         primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
 
@@ -256,18 +275,14 @@ def benchmark_rms_norm(device):
         CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
 
         # warmup
-        rms_norm(x)
-        torch.cuda.synchronize()
+        time_rms_norm()
 
         timings = []
         for _ in range(5):
-            start = time.perf_counter_ns()
-            rms_norm(x)
-            torch.cuda.synchronize()
-            end = time.perf_counter_ns()
-            timings.append(end - start)
+            milliseconds = time_rms_norm()
+            timings.append(milliseconds)
 
-        print(f"SM count: {sm_cnt}, Time: {np.mean(timings) / 1e6} ms")
+        print(f"SM count: {sm_cnt}, Time: {np.mean(timings)} ms")
 
 
 def test_multiple_streams(device):
@@ -315,8 +330,11 @@ def main():
     # test_multiple_streams(device)
 
 
+    print("\n\nMATMUL")
     benchmark_matmul(device)
+    print("\n\nFLASH ATTENTION")
     benchmark_flash_attention(device)
+    print("\n\nRMS NORM")
     benchmark_rms_norm(device)
 
     CHECK_CUDA(cuda.cuCtxDestroy(context))
