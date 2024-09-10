@@ -226,22 +226,92 @@ def benchmark_embedding(device, input_sizes: list[int]):
     
     return [tuple(map(str, tup)) for tup in ret]
 
-def benchmark_flash_attention(device, batch_sizes: list[int], seqlens: list[int]):
+def benchmark_flash_attn_prefill(device, prefill_sizes: list[int]):
+    from flash_attn import flash_attn_varlen_func
+    nheads = 32
+    nkvheads = 8
+    headdim = 128
+
+    @cuda_timing_decorator
+    def time_flash_attn_prefill(
+        q,
+        k,
+        v,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        max_seqlen_q,
+        max_seqlen_k
+    ):
+        flash_attn_varlen_func(
+            q,
+            k,
+            v,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k
+        )
+
+    ret = []
+    for prefill_size in prefill_sizes:
+        q = torch.randn(prefill_size, nheads, headdim, dtype=torch.bfloat16, device='cuda')
+        k = torch.randn(prefill_size, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
+        v = torch.randn(prefill_size, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
+        cu_seqlens_q = torch.tensor([0, prefill_size], dtype=torch.int32, device='cuda')
+        cu_seqlens_k = torch.tensor([0, prefill_size], dtype=torch.int32, device='cuda')
+        max_seqlen_q = prefill_size
+        max_seqlen_k = prefill_size
+        torch.cuda.synchronize()
+
+        for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
+            primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+
+            # Create a stream for the green context
+            CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
+
+            # warmup
+            time_flash_attn_prefill(
+                q,
+                k,
+                v,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max_seqlen_q,
+                max_seqlen_k
+            )
+
+            timings = [
+                time_flash_attn_prefill(
+                    q,
+                    k,
+                    v,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_seqlen_q,
+                    max_seqlen_k
+                )
+                for _ in range(5)
+            ]
+            ret.append((prefill_size, sm_cnt, np.mean(timings)))
+    
+    return [tuple(map(str, tup)) for tup in ret]
+
+def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: list[int]):
     from flash_attn import flash_attn_with_kvcache
     nheads = 32
     nkvheads = 8
     headdim = 128
 
     @cuda_timing_decorator
-    def time_flash_attn(q, k_cache, v_cache):
+    def time_flash_attn_decode(q, k_cache, v_cache):
         flash_attn_with_kvcache(q, k_cache, v_cache)
 
     ret = []
     for batch_size in batch_sizes:
-        for seqlen in seqlens:
+        for context_size in context_sizes:
             q = torch.randn(batch_size, 1, nheads, headdim, dtype=torch.bfloat16, device='cuda')
-            k_cache = torch.randn(batch_size, seqlen, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
-            v_cache = torch.randn(batch_size, seqlen, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
+            k_cache = torch.randn(batch_size, context_size, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
+            v_cache = torch.randn(batch_size, context_size, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
             torch.cuda.synchronize()
 
             for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
@@ -251,10 +321,10 @@ def benchmark_flash_attention(device, batch_sizes: list[int], seqlens: list[int]
                 CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
 
                 # warmup
-                time_flash_attn(q, k_cache, v_cache)
+                time_flash_attn_decode(q, k_cache, v_cache)
 
-                timings = [time_flash_attn(q, k_cache, v_cache) for _ in range(5)]
-                ret.append((batch_size, seqlen, sm_cnt, np.mean(timings)))
+                timings = [time_flash_attn_decode(q, k_cache, v_cache) for _ in range(5)]
+                ret.append((batch_size, context_size, sm_cnt, np.mean(timings)))
     
     return [tuple(map(str, tup)) for tup in ret]
 
@@ -306,12 +376,15 @@ def benchmark_rms_norm(device, batch_sizes: list[int], seqlens: list[int]):
     return [tuple(map(str, tup)) for tup in ret]
 
 def write_csv(results, kernel):
+    kernel_csv_header = {
+        'matmul': 'input size,SM count,milliseconds\n',
+        'embedding': 'input size,SM count,milliseconds\n',
+        'flash_attn_prefill': 'prefill size,SM count,milliseconds\n',
+        'flash_attn_decode': 'batch size,context size,SM count,milliseconds\n',
+        'rms_norm': 'batch size,seqlen,SM count,milliseconds\n'
+    }
     with open(f'{kernel}_results.csv', 'w') as f:
-        if kernel in ('matmul', 'embedding'):
-            f.write('input size,SM count,milliseconds\n')
-        else:
-            f.write('batch size,seqlen,SM count,milliseconds\n')
-        
+        f.write(kernel_csv_header[kernel])
         for tup in results:
             f.write(','.join(tup) + '\n')
 
@@ -369,8 +442,11 @@ def main():
     embedding_res = benchmark_embedding(device, input_sizes)
     write_csv(embedding_res, 'embedding')
     
-    flash_attn_res = benchmark_flash_attention(device, batch_sizes, input_sizes)
-    write_csv(flash_attn_res, 'flash_attn')
+    flash_attn_prefill_res = benchmark_flash_attn_prefill(device, input_sizes)
+    write_csv(flash_attn_prefill_res, 'flash_attn_prefill')
+    
+    flash_attn_decode_res = benchmark_flash_attn_decode(device, batch_sizes, input_sizes)
+    write_csv(flash_attn_decode_res, 'flash_attn_decode')
     
     # decrease test range here due to large allocations
     rms_norm_res = benchmark_rms_norm(device, batch_sizes[:-1], input_sizes[:-1])
