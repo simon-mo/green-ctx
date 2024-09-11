@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import ctypes
 
+
 # Define CHECK_CUDA function
 def _cudaGetErrorEnum(error):
     if isinstance(error, cuda.CUresult):
@@ -15,6 +16,7 @@ def _cudaGetErrorEnum(error):
     else:
         raise RuntimeError('Unknown error type: {}'.format(error))
 
+
 def CHECK_CUDA(result):
     if result[0].value:
         raise RuntimeError("CUDA error code={}({})".format(result[0].value, _cudaGetErrorEnum(result[0])))
@@ -24,6 +26,7 @@ def CHECK_CUDA(result):
         return result[1]
     else:
         return result[1:]
+
 
 def cuda_timing_decorator(func):
     def wrapper(*args, **kwargs):
@@ -48,6 +51,7 @@ def cuda_timing_decorator(func):
     
     return wrapper
 
+
 # Define CUDA kernel
 kernel_code = """
 __device__ unsigned int __smid(void) {
@@ -63,6 +67,7 @@ extern "C" __global__ void write_smid(int *d_sm_ids, int size) {
     }
 }
 """
+
 
 # Compile the CUDA kernel
 def compile_kernel():
@@ -84,6 +89,7 @@ def compile_kernel():
     ptx = np.char.array(ptx)
     module = CHECK_CUDA(cuda.cuModuleLoadData(ptx.ctypes.data))
     return CHECK_CUDA(cuda.cuModuleGetFunction(module, b"write_smid"))
+
 
 # Launch SMID kernel
 def launch_smid(h_sm_ids, num_sm, stream=None):
@@ -127,6 +133,7 @@ def launch_smid(h_sm_ids, num_sm, stream=None):
     # Free device memory
     CHECK_CUDA(cuda.cuMemFree(d_sm_ids))
 
+
 def create_green_ctx(device, sm_request):
     # Get SM resource
     sm_resource = CHECK_CUDA(cuda.cuDeviceGetDevResource(device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
@@ -151,6 +158,7 @@ def create_green_ctx(device, sm_request):
     green_ctx_ctx = CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
     return green_ctx_ctx, green_ctx
 
+
 def workload_smid():
     num_sm = 200
     h_sm_ids = np.zeros(num_sm, dtype=np.int32)
@@ -174,13 +182,13 @@ def benchmark_matmul(device, input_sizes: list[int]):
     def time_matmul(a, b):
         torch.matmul(a, b)
 
-    ret = []
+    ret: list[tuple] = []
     for input_size in input_sizes:
         b = torch.randn(4096, input_size, dtype=torch.bfloat16).cuda() # prefill size
         torch.cuda.synchronize()
 
         for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-            primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+            primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
             # Create a stream for the green context
             CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
@@ -190,14 +198,15 @@ def benchmark_matmul(device, input_sizes: list[int]):
             try:
                 for _ in range(3):
                     time_matmul(a, b)
-            except RuntimeError as err:
-                ret.append((input_size, sm_cnt, err))
+            except RuntimeError:
+                ret.append((input_size, sm_cnt, 'cublas error'))
                 continue
 
             timings = [time_matmul(a, b) for _ in range(5)]
             ret.append((input_size, sm_cnt, np.mean(timings)))
 
     return [tuple(map(str, tup)) for tup in ret]
+
 
 def benchmark_embedding(device, input_sizes: list[int]):
     weight = torch.randn(128256, 4096).cuda()
@@ -206,13 +215,13 @@ def benchmark_embedding(device, input_sizes: list[int]):
     def time_embedding(weight, indices):
         torch.embedding(weight, indices)
 
-    ret = []
+    ret: list[tuple] = []
     for input_size in input_sizes:
         indices = torch.randint(0, 128256, (input_size,)).cuda()
         torch.cuda.synchronize()
 
         for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-            primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+            primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
             # Create a stream for the green context
             CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
@@ -225,6 +234,7 @@ def benchmark_embedding(device, input_sizes: list[int]):
             ret.append((input_size, sm_cnt, np.mean(timings)))
     
     return [tuple(map(str, tup)) for tup in ret]
+
 
 def benchmark_flash_attn_prefill(device, prefill_sizes: list[int]):
     from flash_attn import flash_attn_varlen_func
@@ -252,7 +262,7 @@ def benchmark_flash_attn_prefill(device, prefill_sizes: list[int]):
             max_seqlen_k
         )
 
-    ret = []
+    ret: list[tuple] = []
     for prefill_size in prefill_sizes:
         q = torch.randn(prefill_size, nheads, headdim, dtype=torch.bfloat16, device='cuda')
         k = torch.randn(prefill_size, nkvheads, headdim, dtype=torch.bfloat16, device='cuda')
@@ -264,7 +274,7 @@ def benchmark_flash_attn_prefill(device, prefill_sizes: list[int]):
         torch.cuda.synchronize()
 
         for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-            primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+            primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
             # Create a stream for the green context
             CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
@@ -296,6 +306,7 @@ def benchmark_flash_attn_prefill(device, prefill_sizes: list[int]):
     
     return [tuple(map(str, tup)) for tup in ret]
 
+
 def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: list[int]):
     from flash_attn import flash_attn_with_kvcache
     nheads = 32
@@ -306,7 +317,7 @@ def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: l
     def time_flash_attn_decode(q, k_cache, v_cache):
         flash_attn_with_kvcache(q, k_cache, v_cache)
 
-    ret = []
+    ret: list[tuple] = []
     for batch_size in batch_sizes:
         for context_size in context_sizes:
             q = torch.randn(batch_size, 1, nheads, headdim, dtype=torch.bfloat16, device='cuda')
@@ -315,7 +326,7 @@ def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: l
             torch.cuda.synchronize()
 
             for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-                primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+                primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
                 # Create a stream for the green context
                 CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
@@ -327,6 +338,7 @@ def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: l
                 ret.append((batch_size, context_size, sm_cnt, np.mean(timings)))
     
     return [tuple(map(str, tup)) for tup in ret]
+
 
 from torch import nn
 class LlamaRMSNorm(nn.Module):
@@ -345,7 +357,8 @@ class LlamaRMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
 
-def benchmark_rms_norm(device, batch_sizes: list[int], seqlens: list[int]):
+
+def benchmark_rms_norm(device, batch_sizes: list[int], context_sizes: list[int]):
     dim = 4096  # from llama3 ModelArgs.dim
     rms_norm = LlamaRMSNorm(dim)
     rms_norm.cuda()
@@ -355,14 +368,14 @@ def benchmark_rms_norm(device, batch_sizes: list[int], seqlens: list[int]):
     def time_rms_norm(x):
         rms_norm(x)
 
-    ret = []
+    ret: list[tuple] = []
     for batch_size in batch_sizes:
-        for seqlen in seqlens:
-            x = torch.randn(batch_size, seqlen, dim, device='cuda')
+        for context_size in context_sizes:
+            x = torch.randn(batch_size, context_size, dim, device='cuda')
             torch.cuda.synchronize()
 
             for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-                primary_ctx, green_ctx = create_green_ctx(device, sm_cnt)
+                primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
                 # Create a stream for the green context
                 CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
@@ -371,9 +384,10 @@ def benchmark_rms_norm(device, batch_sizes: list[int], seqlens: list[int]):
                 time_rms_norm(x)
 
                 timings = [time_rms_norm(x) for _ in range(5)]
-                ret.append((batch_size, seqlen, sm_cnt, np.mean(timings)))
+                ret.append((batch_size, context_size, sm_cnt, np.mean(timings)))
     
     return [tuple(map(str, tup)) for tup in ret]
+
 
 def write_csv(results, kernel):
     kernel_csv_header = {
@@ -381,12 +395,13 @@ def write_csv(results, kernel):
         'embedding': 'input size,SM count,milliseconds\n',
         'flash_attn_prefill': 'prefill size,SM count,milliseconds\n',
         'flash_attn_decode': 'batch size,context size,SM count,milliseconds\n',
-        'rms_norm': 'batch size,seqlen,SM count,milliseconds\n'
+        'rms_norm': 'batch size,context size,SM count,milliseconds\n'
     }
     with open(f'{kernel}_results.csv', 'w') as f:
         f.write(kernel_csv_header[kernel])
         for tup in results:
             f.write(','.join(tup) + '\n')
+
 
 def test_multiple_streams(device):
     green_primary_ctx, green_ctx = create_green_ctx(device, 8)
