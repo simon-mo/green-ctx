@@ -175,35 +175,36 @@ def workload_smid():
     # print(" ".join(map(str, h_sm_ids)))
 
 
-def benchmark_matmul(device, input_sizes: list[int]):
-    a = torch.randn(14336, 4096, dtype=torch.bfloat16).cuda()
-
+def benchmark_matmul(device, linear_shapes: list[tuple[int]], context_sizes: list[int]):
     @cuda_timing_decorator
     def time_matmul(a, b):
         torch.matmul(a, b)
 
     ret: list[tuple] = []
-    for input_size in input_sizes:
-        b = torch.randn(4096, input_size, dtype=torch.bfloat16).cuda() # prefill size
-        torch.cuda.synchronize()
+    for input_size, output_size in linear_shapes:
+        linear = torch.randn(input_size, output_size, dtype=torch.bfloat16).cuda()
 
-        for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-            primary_ctx, _ = create_green_ctx(device, sm_cnt)
+        for context_size in context_sizes:
+            x = torch.randn(context_size, input_size, dtype=torch.bfloat16).cuda()
+            torch.cuda.synchronize()
 
-            # Create a stream for the green context
-            CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
+            for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
+                primary_ctx, _ = create_green_ctx(device, sm_cnt)
 
-            # warmup
-            # for some input sizes, sm_cnt=8 will throw cuda error `CUBLAS_STATUS_EXECUTION_FAILED`
-            try:
-                for _ in range(3):
-                    time_matmul(a, b)
-            except RuntimeError:
-                ret.append((input_size, sm_cnt, 'cublas error'))
-                continue
+                # Create a stream for the green context
+                CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
 
-            timings = [time_matmul(a, b) for _ in range(5)]
-            ret.append((input_size, sm_cnt, np.mean(timings)))
+                # warmup
+                # for some input sizes, sm_cnt=8 will throw cuda error `CUBLAS_STATUS_EXECUTION_FAILED`
+                try:
+                    for _ in range(3):
+                        time_matmul(x, linear)
+                except RuntimeError:
+                    ret.append((f'{input_size} x {output_size}', context_size, sm_cnt, 'cublas error'))
+                    continue
+
+                timings = [time_matmul(x, linear) for _ in range(5)]
+                ret.append((f'{input_size} x {output_size}', context_size, sm_cnt, np.mean(timings)))
 
     return [tuple(map(str, tup)) for tup in ret]
 
@@ -391,7 +392,7 @@ def benchmark_rms_norm(device, batch_sizes: list[int], context_sizes: list[int])
 
 def write_csv(results, kernel):
     kernel_csv_header = {
-        'matmul': 'input size,SM count,milliseconds\n',
+        'matmul': 'matrix shape,context size,SM count,milliseconds\n',
         'embedding': 'input size,SM count,milliseconds\n',
         'flash_attn_prefill': 'prefill size,SM count,milliseconds\n',
         'flash_attn_decode': 'batch size,context size,SM count,milliseconds\n',
@@ -447,11 +448,13 @@ def main():
     # try create two streams for the same green context, and dispatch the workload to them
     # test_multiple_streams(device)
 
-    # these are 'prefill' sizes (?)
+    # linear shapes are from llama 3 in vllm, exactly 4 matrices in every layer
+    # last shape is for logits processor -> hidden dim to vocab dim
+    linear_shapes = [(4096, 6144), (4096, 4096), (4096, 28672), (14336, 4096), (4096, 128256)]
     input_sizes = [8, 1024, 2048, 4096, 8192, 16384, 32768]
     batch_sizes = [2**i for i in range(8)]
     
-    matmul_res = benchmark_matmul(device, input_sizes)
+    matmul_res = benchmark_matmul(device, linear_shapes, input_sizes)
     write_csv(matmul_res, 'matmul')
     
     embedding_res = benchmark_embedding(device, input_sizes)
