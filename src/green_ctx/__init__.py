@@ -4,6 +4,7 @@ import numpy as np
 import ctypes
 from dataclasses import dataclass
 from typing import Any
+from contextlib import contextmanager
 
 from .utils import CHECK_CUDA
 
@@ -27,8 +28,12 @@ class GreenContext:
     primary_context: Any = None
     stream: Any = None
 
-    def set_context(self):
+    @contextmanager
+    def with_context(self):
+        old_context = CHECK_CUDA(cuda.cuCtxGetCurrent())
         CHECK_CUDA(cuda.cuCtxSetCurrent(self.primary_context))
+        yield
+        CHECK_CUDA(cuda.cuCtxSetCurrent(old_context))
 
 
 def make_shard(sm_request: int) -> GreenContext:
