@@ -1,3 +1,5 @@
+from cuda import cuda, nvrtc
+
 # Define CHECK_CUDA function
 def _cudaGetErrorEnum(error):
     if isinstance(error, cuda.CUresult):
