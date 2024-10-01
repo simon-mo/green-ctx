@@ -175,17 +175,21 @@ def workload_smid():
     # print(" ".join(map(str, h_sm_ids)))
 
 
-def benchmark_matmul(device, linear_shapes: list[tuple[int]], context_sizes: list[int]):
+def benchmark_matmul(device, num_tokens_list: list[int]):
+    # linear shapes are from llama 3 in vllm, exactly 4 matrices in every layer
+    # last shape is for logits processor -> hidden dim to vocab dim
+    linear_shapes = [(4096, 6144), (4096, 4096), (4096, 28672), (14336, 4096), (4096, 128256)]
+
     @cuda_timing_decorator
     def time_matmul(a, b):
         torch.matmul(a, b)
 
     ret: list[tuple] = []
     for input_size, output_size in linear_shapes:
-        linear = torch.randn(input_size, output_size, dtype=torch.bfloat16).cuda()
+        linear = torch.randn(input_size, output_size, dtype=torch.bfloat16, device='cuda')
 
-        for context_size in context_sizes:
-            x = torch.randn(context_size, input_size, dtype=torch.bfloat16).cuda()
+        for num_tokens in num_tokens_list:
+            x = torch.randn(num_tokens, input_size, dtype=torch.bfloat16, device='cuda')
             torch.cuda.synchronize()
 
             for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
@@ -200,25 +204,26 @@ def benchmark_matmul(device, linear_shapes: list[tuple[int]], context_sizes: lis
                     for _ in range(3):
                         time_matmul(x, linear)
                 except RuntimeError:
-                    ret.append((f'{input_size} x {output_size}', context_size, sm_cnt, 'cublas error'))
+                    ret.append((f'{input_size} x {output_size}', num_tokens, sm_cnt, 'cublas error'))
                     continue
 
                 timings = [time_matmul(x, linear) for _ in range(5)]
-                ret.append((f'{input_size} x {output_size}', context_size, sm_cnt, np.mean(timings)))
-
+                ret.append((f'{input_size} x {output_size}', num_tokens, sm_cnt, np.mean(timings)))
+    
     return [tuple(map(str, tup)) for tup in ret]
 
 
-def benchmark_embedding(device, input_sizes: list[int]):
-    weight = torch.randn(128256, 4096).cuda()
+def benchmark_embedding(device, num_tokens_list: list[int]):
+    # torch.embedding is just index_select under the hood
+    weight = torch.randn(128256, 4096, device='cuda')
 
     @cuda_timing_decorator
     def time_embedding(weight, indices):
         torch.embedding(weight, indices)
 
     ret: list[tuple] = []
-    for input_size in input_sizes:
-        indices = torch.randint(0, 128256, (input_size,)).cuda()
+    for num_tokens in num_tokens_list:
+        indices = torch.randint(0, 128256, (num_tokens,), device='cuda')
         torch.cuda.synchronize()
 
         for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
@@ -232,7 +237,56 @@ def benchmark_embedding(device, input_sizes: list[int]):
                 time_embedding(weight, indices)
 
             timings = [time_embedding(weight, indices) for _ in range(5)]
-            ret.append((input_size, sm_cnt, np.mean(timings)))
+            ret.append((num_tokens, sm_cnt, np.mean(timings)))
+    
+    return [tuple(map(str, tup)) for tup in ret]
+
+
+from torch import nn
+class LlamaRMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
+        """
+        LlamaRMSNorm is equivalent to T5LayerNorm
+        """
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size, device='cuda'))
+        self.variance_epsilon = eps
+
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
+
+
+def benchmark_rms_norm(device, num_tokens_list: list[int]):
+    dim = 4096  # from llama3 ModelArgs.dim
+    rms_norm = LlamaRMSNorm(dim)
+    rms_norm.cuda()
+    rms_norm = torch.compile(rms_norm)
+
+    @cuda_timing_decorator
+    def time_rms_norm(x):
+        rms_norm(x)
+
+    ret: list[tuple] = []
+    for num_tokens in num_tokens_list:
+        x = torch.randn(num_tokens, dim, device='cuda')
+        torch.cuda.synchronize()
+
+        for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
+            primary_ctx, _ = create_green_ctx(device, sm_cnt)
+
+            # Create a stream for the green context
+            CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
+
+            # warmup
+            for _ in range(3):
+                time_rms_norm(x)
+
+            timings = [time_rms_norm(x) for _ in range(5)]
+            ret.append((num_tokens, sm_cnt, np.mean(timings)))
     
     return [tuple(map(str, tup)) for tup in ret]
 
@@ -341,64 +395,15 @@ def benchmark_flash_attn_decode(device, batch_sizes: list[int], context_sizes: l
     return [tuple(map(str, tup)) for tup in ret]
 
 
-from torch import nn
-class LlamaRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
-        """
-        LlamaRMSNorm is equivalent to T5LayerNorm
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size, device='cuda'))
-        self.variance_epsilon = eps
-
-    def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-
-
-def benchmark_rms_norm(device, batch_sizes: list[int], context_sizes: list[int]):
-    dim = 4096  # from llama3 ModelArgs.dim
-    rms_norm = LlamaRMSNorm(dim)
-    rms_norm.cuda()
-    rms_norm = torch.compile(rms_norm)
-
-    @cuda_timing_decorator
-    def time_rms_norm(x):
-        rms_norm(x)
-
-    ret: list[tuple] = []
-    for batch_size in batch_sizes:
-        for context_size in context_sizes:
-            x = torch.randn(batch_size, context_size, dim, device='cuda')
-            torch.cuda.synchronize()
-
-            for sm_cnt in [8, 16, 32, 48, 64, 96, 128, 132]:
-                primary_ctx, _ = create_green_ctx(device, sm_cnt)
-
-                # Create a stream for the green context
-                CHECK_CUDA(cuda.cuCtxSetCurrent(primary_ctx))
-
-                # warmup
-                time_rms_norm(x)
-
-                timings = [time_rms_norm(x) for _ in range(5)]
-                ret.append((batch_size, context_size, sm_cnt, np.mean(timings)))
-    
-    return [tuple(map(str, tup)) for tup in ret]
-
-
-def write_csv(results, kernel):
+def write_csv(dir, results, kernel):
     kernel_csv_header = {
-        'matmul': 'matrix shape,context size,SM count,milliseconds\n',
-        'embedding': 'input size,SM count,milliseconds\n',
+        'matmul': 'matrix shape,num tokens,SM count,milliseconds\n',
+        'embedding': 'num tokens,SM count,milliseconds\n',
+        'rms_norm': 'num tokens,SM count,milliseconds\n',
         'flash_attn_prefill': 'prefill size,SM count,milliseconds\n',
         'flash_attn_decode': 'batch size,context size,SM count,milliseconds\n',
-        'rms_norm': 'batch size,context size,SM count,milliseconds\n'
     }
-    with open(f'{kernel}_results.csv', 'w') as f:
+    with open(f'{dir}/{kernel}_results.csv', 'w') as f:
         f.write(kernel_csv_header[kernel])
         for tup in results:
             f.write(','.join(tup) + '\n')
@@ -448,27 +453,29 @@ def main():
     # try create two streams for the same green context, and dispatch the workload to them
     # test_multiple_streams(device)
 
-    # linear shapes are from llama 3 in vllm, exactly 4 matrices in every layer
-    # last shape is for logits processor -> hidden dim to vocab dim
-    linear_shapes = [(4096, 6144), (4096, 4096), (4096, 28672), (14336, 4096), (4096, 128256)]
-    input_sizes = [8, 1024, 2048, 4096, 8192, 16384, 32768]
+    csv_dir = '/workspace/green-ctx/data'
+    
+    # matmul, embedding, rmsnorm inputs
+    num_tokens_list = [2**i for i in range(18)]  # max: 2^17 ~= 130k
+    
+    matmul_res = benchmark_matmul(device, num_tokens_list)
+    write_csv(csv_dir, matmul_res, 'matmul')
+    
+    embedding_res = benchmark_embedding(device, num_tokens_list)
+    write_csv(csv_dir, embedding_res, 'embedding')
+    
+    rms_norm_res = benchmark_rms_norm(device, num_tokens_list)
+    write_csv(csv_dir, rms_norm_res, 'rms_norm')
+    
+    # flash attention inputs
+    context_sizes = [2**i for i in range(3, 16)]
     batch_sizes = [2**i for i in range(8)]
     
-    matmul_res = benchmark_matmul(device, linear_shapes, input_sizes)
-    write_csv(matmul_res, 'matmul')
+    flash_attn_prefill_res = benchmark_flash_attn_prefill(device, context_sizes)
+    write_csv(csv_dir, flash_attn_prefill_res, 'flash_attn_prefill')
     
-    embedding_res = benchmark_embedding(device, input_sizes)
-    write_csv(embedding_res, 'embedding')
-    
-    flash_attn_prefill_res = benchmark_flash_attn_prefill(device, input_sizes)
-    write_csv(flash_attn_prefill_res, 'flash_attn_prefill')
-    
-    flash_attn_decode_res = benchmark_flash_attn_decode(device, batch_sizes, input_sizes)
-    write_csv(flash_attn_decode_res, 'flash_attn_decode')
-    
-    # decrease test range here due to large allocations
-    rms_norm_res = benchmark_rms_norm(device, batch_sizes[:-1], input_sizes[:-1])
-    write_csv(rms_norm_res, 'rms_norm')
+    flash_attn_decode_res = benchmark_flash_attn_decode(device, batch_sizes, context_sizes)
+    write_csv(csv_dir, flash_attn_decode_res, 'flash_attn_decode')
 
     CHECK_CUDA(cuda.cuCtxDestroy(context))
 
