@@ -7,6 +7,7 @@ from typing import Any, List, Tuple
 from contextlib import contextmanager
 import math
 from functools import cached_property
+import os
 
 from .utils import CHECK_CUDA
 
@@ -18,7 +19,8 @@ def init():
         torch.cuda.init()
 
     global device
-    device = CHECK_CUDA(cuda.cuDeviceGet(0))
+    cuda_device_num = os.getenv('CUDA_DEVICE', 0)
+    device = CHECK_CUDA(cuda.cuDeviceGet(cuda_device_num))
     context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
     CHECK_CUDA(cuda.cuCtxSetCurrent(context))
 
@@ -54,7 +56,7 @@ class GreenContext:
         return sorted(h_sm_ids.tolist())[1:] # remove the -1
 
 
-def make_shard(sm_request: int) -> GreenContext:
+def make_shard(num_groups: int, sm_request: int) -> GreenContext:
     assert sm_request >= 8 and sm_request % 8 == 0, "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
 
     # Get SM resource
@@ -68,18 +70,18 @@ def make_shard(sm_request: int) -> GreenContext:
     # Split the SM resource
     result_resources, nb_groups, remaining = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
-            1,
+            num_groups,
             sm_resource,
             cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             sm_request,
         )
     )
-    # print(f"Number of groups created: {nb_groups}")
+    print(f"Number of groups created: {nb_groups}")
 
-    # for i in range(nb_groups):
-    #     print(f"Group {i}: {result_resources[i].sm.smCount} SMs")
+    for i in range(nb_groups):
+        print(f"Group {i}: {result_resources[i].sm.smCount} SMs")
 
-    # print(f"Remaining SMs: {remaining.sm.smCount}")
+    print(f"Remaining SMs: {remaining.sm.smCount}")
 
     desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc([result_resources[0]], 1))
     green_ctx = CHECK_CUDA(
