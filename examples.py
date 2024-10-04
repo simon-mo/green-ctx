@@ -6,6 +6,9 @@ from green_ctx.kernels import count_sm_ids, launch_smid
 from green_ctx.timing import cuda_timing_decorator
 from collections import Counter
 
+from cuda import cuda, cudart
+from green_ctx.utils import CHECK_CUDA
+
 
 def example_shard():
     print("---\nExample showcasing limiting the number of SMs used by a context.")
@@ -98,11 +101,46 @@ def partition_two():
         print(Counter(ids_2))
 
 
+def partition_with_torch():
+    print("---\nExample showcasing two torch streams")
+    green_ctx_1, green_ctx_2 = partition(32, 8)
+    print(f"Created {green_ctx_1.sm_count} SMs for shard 1: {green_ctx_1.sm_ids}")
+    print(f"Created {green_ctx_2.sm_count} SMs for shard 2. {green_ctx_2.sm_ids}")
+
+    stream_1 = green_ctx_1.make_stream()
+    stream_2 = green_ctx_2.make_stream()
+
+    torch_stream_1 = torch.cuda.ExternalStream(int(stream_1))
+    torch_stream_2 = torch.cuda.ExternalStream(int(stream_2))
+
+    a = torch.randn(1024, 1024).cuda()
+    b = torch.randn(1024, 1024).cuda()
+
+    with green_ctx_1.with_context():
+        with torch.cuda.stream(torch_stream_1):
+            e_start_1, e_end_1 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            e_start_1.record()
+            c_1 = torch.matmul(a, b)
+            e_end_1.record()
+
+        with torch.cuda.stream(torch_stream_2):
+            e_start_2, e_end_2 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            e_start_2.record()
+            c_2 = torch.matmul(a, b)
+            e_end_2.record()
+
+        torch.cuda.synchronize()
+
+    print(f"Stream 1: {e_start_1.elapsed_time(e_end_1)} ms")
+    print(f"Stream 2: {e_start_2.elapsed_time(e_end_2)} ms")
+
+
 def main():
     # example_shard()
     # benchmark_matmul()
     # multistream_dispatch()
-    partition_two()
+    # partition_two()
+    partition_with_torch()
 
 
 if __name__ == "__main__":

@@ -14,14 +14,18 @@ device = None
 
 
 def init():
-    if not torch.cuda.is_initialized():
-        torch.cuda.init()
-
     global device
+    CHECK_CUDA(cuda.cuInit(0))
     device = CHECK_CUDA(cuda.cuDeviceGet(0))
     context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
     CHECK_CUDA(cuda.cuCtxSetCurrent(context))
 
+    torch.cuda.init()
+    # warmup cublas with a large workspace, this is needed to avoid
+    # CUDA error: CUBLAS_STATUS_INTERNAL_ERROR when calling `cublasCreate(handle)`
+    a = torch.randn((1024, 1024), device="cuda")
+    b = torch.randn((1024, 1024), device="cuda")
+    torch.matmul(a, b)
 
 @dataclass
 class GreenContext:
@@ -38,7 +42,7 @@ class GreenContext:
     def make_stream(self):
         stream = CHECK_CUDA(
             cuda.cuGreenCtxStreamCreate(
-                self.raw_context, cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0
+                self.primary_context, cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0
             )
         )
         return stream
