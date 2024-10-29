@@ -15,11 +15,9 @@ device = None
 
 
 def init():
-    device_num = os.environ["CUDA_VISIBLE_DEVICES"]
-    assert device_num.isdigit(), "Only one device may be used to init."
     global device
     CHECK_CUDA(cuda.cuInit(0))
-    device = CHECK_CUDA(cuda.cuDeviceGet(int(device_num)))
+    device = CHECK_CUDA(cuda.cuDeviceGet(0))
     context = CHECK_CUDA(cuda.cuCtxCreate(0, device))
     CHECK_CUDA(cuda.cuCtxSetCurrent(context))
 
