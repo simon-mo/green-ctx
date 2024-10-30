@@ -4,7 +4,10 @@ import numpy as np
 from green_ctx import make_shard, init, partition
 from green_ctx.kernels import count_sm_ids, launch_smid
 from green_ctx.timing import cuda_timing_decorator
+from green_ctx.utils import print_current_context_id
+
 from collections import Counter
+import time
 
 from cuda import cuda, cudart
 from green_ctx.utils import CHECK_CUDA
@@ -24,7 +27,10 @@ def example_shard():
 
 
 def benchmark_matmul():
-    print("---\nBenchmarking matrix multiplication (M=N=K=1024) with different number of SMs.")
+    print(
+        "---\nBenchmarking matrix multiplication (M=N=K=1024) with different number of SMs."
+    )
+
     @cuda_timing_decorator
     def matmul(a, b, c):
         torch.matmul(a, b, out=c)
@@ -47,6 +53,7 @@ def benchmark_matmul():
     for sm, ms in sms_to_ms.items():
         print(f"{sm}: {ms:.2f}")
 
+
 def multistream_dispatch():
     print("---\nExample showcasing multi-stream dispatch under the same context.")
     green_ctx = make_shard(8)
@@ -66,6 +73,7 @@ def multistream_dispatch():
         print(Counter(ids_1))
         print("SM utilizations for stream 2 ({SM ID: usage count})")
         print(Counter(ids_2))
+
 
 def partition_two():
     print("---\nExample showcasing partitioning a device into two shards")
@@ -118,29 +126,53 @@ def partition_with_torch():
 
     with green_ctx_1.with_context():
         with torch.cuda.stream(torch_stream_1):
-            e_start_1, e_end_1 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            e_start_1, e_end_1 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
+                enable_timing=True
+            )
             e_start_1.record()
             c_1 = torch.matmul(a, b)
             e_end_1.record()
 
+    with green_ctx_2.with_context():
         with torch.cuda.stream(torch_stream_2):
-            e_start_2, e_end_2 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+            e_start_2, e_end_2 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
+                enable_timing=True
+            )
             e_start_2.record()
             c_2 = torch.matmul(a, b)
             e_end_2.record()
 
-        torch.cuda.synchronize()
+    torch.cuda.synchronize()
 
     print(f"Stream 1: {e_start_1.elapsed_time(e_end_1)} ms")
     print(f"Stream 2: {e_start_2.elapsed_time(e_end_2)} ms")
 
 
+def benchmark_set_context():
+    print("---\nBenchmarking the overhead of setting a context")
+
+    green_ctx = make_shard(8)
+    push_times = []
+    pop_times = []
+    for _ in range(100):
+        start = time.perf_counter_ns()
+        with green_ctx.with_context():
+            enter = time.perf_counter_ns()
+        exit = time.perf_counter_ns()
+        push_times.append(enter - start)
+        pop_times.append(exit - enter)
+
+    print(f"Average time to push context: {np.mean(push_times) * 1e-3:.2f} us")
+    print(f"Average time to pop context: {np.mean(pop_times) * 1e-3:.2f} us")
+
+
 def main():
-    # example_shard()
-    # benchmark_matmul()
-    # multistream_dispatch()
-    # partition_two()
+    example_shard()
+    benchmark_matmul()
+    multistream_dispatch()
+    partition_two()
     partition_with_torch()
+    benchmark_set_context()
 
 
 if __name__ == "__main__":

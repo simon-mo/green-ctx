@@ -1,5 +1,6 @@
 from cuda import cuda, nvrtc
 
+
 # Define CHECK_CUDA function
 def _cudaGetErrorEnum(error):
     if isinstance(error, cuda.CUresult):
@@ -9,6 +10,12 @@ def _cudaGetErrorEnum(error):
         return nvrtc.nvrtcGetErrorString(error)[1]
     else:
         raise RuntimeError("Unknown error type: {}".format(error))
+
+
+def print_current_context_id():
+    ctx = CHECK_CUDA(cuda.cuCtxGetCurrent())
+    device = CHECK_CUDA(cuda.cuDeviceGet(0))
+    print(f"Current context ID: {ctx}, device ID: {device}")
 
 
 def CHECK_CUDA(result):
