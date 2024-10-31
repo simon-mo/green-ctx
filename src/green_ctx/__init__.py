@@ -119,7 +119,7 @@ def partition(sm_size_a: int, sm_size_b: int) -> Tuple[GreenContext, GreenContex
             device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
         )
     )
-    # split into groups of 8, so we want total of 16
+    # split into groups of 8, so we want total of 16 groups where 8x16=128
     result_resources, nb_groups, remaining = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
             16,
