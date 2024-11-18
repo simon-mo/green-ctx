@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from green_ctx import make_shard, init, partition
+from green_ctx import make_shard, init, partition, get_sms_in_range
 from green_ctx.kernels import count_sm_ids, launch_smid
 from green_ctx.timing import cuda_timing_decorator
 from green_ctx.utils import print_current_context_id
@@ -165,6 +165,24 @@ def benchmark_set_context():
     print(f"Average time to push context: {np.mean(push_times) * 1e-3:.2f} us")
     print(f"Average time to pop context: {np.mean(pop_times) * 1e-3:.2f} us")
 
+def check_get_sms_in_range():
+    print(("---\nGetting SMs in a range"))
+
+    green_ctx = get_sms_in_range(0, 80)
+    green_ctx2 = get_sms_in_range(80, 120)
+
+    print("Green ctx1 SM count", green_ctx.sm_count)
+    print("Green ctx2 SM count", green_ctx2.sm_count)
+
+    overlaps = set(green_ctx.sm_ids) & set(green_ctx2.sm_ids)
+    print("Overlap SM count", len(overlaps))
+    if overlaps:
+        print("Overlaps found in sm_ids", overlaps)
+    else:
+        print("No overlaps in sm_ids between the two contexts.")
+
+
+
 
 def main():
     example_shard()
@@ -173,6 +191,7 @@ def main():
     partition_two()
     partition_with_torch()
     benchmark_set_context()
+    check_get_sms_in_range()
 
 
 if __name__ == "__main__":
