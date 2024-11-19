@@ -62,6 +62,67 @@ class GreenContext:
         return sorted(h_sm_ids.tolist())[1:]  # remove the -1
 
 
+def get_sms_in_range(start: int, end: int, get_remainder: bool=False) -> GreenContext:
+    """gets SMs in range from start to end (non-inclusive)
+    NOTE: very sus behavior, idk why it only has 15 x 8 = 120 SMs avail in result_resources
+    """
+
+    sm_resource = CHECK_CUDA(
+        cuda.cuDeviceGetDevResource(
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
+        )
+    )
+
+
+    result_resources, _, remainder = CHECK_CUDA(
+        cuda.cuDevSmResourceSplitByCount(
+            16,
+            sm_resource,
+            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            8,
+        )
+    )
+
+    current_sm_id = 0
+    group_indices_in_range = set()
+
+    for group_idx, res in enumerate(result_resources):
+        group_sm_count = res.sm.smCount
+        group_start = current_sm_id
+        group_end = current_sm_id + group_sm_count
+
+        if start < group_end and end > group_start:
+            group_indices_in_range.add(group_idx)
+
+        current_sm_id += group_sm_count
+
+    selected_resources = [result_resources[idx] for idx in sorted(group_indices_in_range)]
+
+    if get_remainder:
+        selected_resources.append(remainder)
+
+    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(selected_resources, len(selected_resources)))
+    green_ctx = CHECK_CUDA(
+        cuda.cuGreenCtxCreate(
+            desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
+        )
+    )
+    green_sm_resource = CHECK_CUDA(
+        cuda.cuGreenCtxGetDevResource(
+            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
+        )
+    )
+
+    gc = GreenContext(
+        sm_count=green_sm_resource.sm.smCount, raw_context=green_ctx, primary_context=CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
+    )
+
+    # print(gc.sm_ids)
+
+    return gc
+
+
+
 def make_shard(sm_request: int) -> GreenContext:
     assert (
         sm_request >= 8 and sm_request % 8 == 0
