@@ -168,8 +168,8 @@ def benchmark_set_context():
 def check_get_sms_in_range():
     print(("---\nGetting SMs in a range"))
 
-    green_ctx = get_sms_in_range(0, 80)
-    green_ctx2 = get_sms_in_range(80, 120)
+    green_ctx = get_sms_in_range(0, 80, False)
+    green_ctx2 = get_sms_in_range(80, 120, True)
 
     print("Green ctx1 SM count", green_ctx.sm_count)
     print("Green ctx2 SM count", green_ctx2.sm_count)

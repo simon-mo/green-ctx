@@ -62,7 +62,7 @@ class GreenContext:
         return sorted(h_sm_ids.tolist())[1:]  # remove the -1
 
 
-def get_sms_in_range(start: int, end: int) -> GreenContext:
+def get_sms_in_range(start: int, end: int, get_remainder: bool=False) -> GreenContext:
     """gets SMs in range from start to end (non-inclusive)
     NOTE: very sus behavior, idk why it only has 15 x 8 = 120 SMs avail in result_resources
     """
@@ -74,21 +74,20 @@ def get_sms_in_range(start: int, end: int) -> GreenContext:
     )
 
 
-    result_resources, _, _ = CHECK_CUDA(
+    result_resources, _, remainder = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
             16,
             sm_resource,
             cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             8,
         )
-    ) # idk why the last resource sm count is 0.
+    )
 
     current_sm_id = 0
     group_indices_in_range = set()
 
     for group_idx, res in enumerate(result_resources):
         group_sm_count = res.sm.smCount
-        # print(group_sm_count)
         group_start = current_sm_id
         group_end = current_sm_id + group_sm_count
 
@@ -98,6 +97,9 @@ def get_sms_in_range(start: int, end: int) -> GreenContext:
         current_sm_id += group_sm_count
 
     selected_resources = [result_resources[idx] for idx in sorted(group_indices_in_range)]
+
+    if get_remainder:
+        selected_resources.append(remainder)
 
     desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(selected_resources, len(selected_resources)))
     green_ctx = CHECK_CUDA(
