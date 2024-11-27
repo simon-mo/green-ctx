@@ -84,7 +84,7 @@ def verify_single_process():
     elapsed_time = start_event.elapsed_time(end_event)
     total_time = (end_time - start_time) * 1000
     print(f"Single thread computation time: {elapsed_time:.2f} ms")
-    print(f"Total experiment time (excluding initialization): {total_time:.2f} ms")
+    print(f"Total experiment time: {total_time:.2f} ms")
 
 def main():
     warm_up_gpu()
