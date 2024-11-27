@@ -18,7 +18,7 @@ def worker_matrix_multiply(use_first_partition, result_dict, process_id, barrier
     init()  
     green_ctx_1, green_ctx_2 = partition(8, 8)
     context = green_ctx_1 if use_first_partition else green_ctx_2
-    a, b = initialize_data(2048)
+    a, b = initialize_data(4096)
 
     with context.with_context():
         stream = context.make_stream()
@@ -65,7 +65,7 @@ def verify_single_process():
     init() 
     green_ctx = make_shard(8)
 
-    matrix_size = 2048
+    matrix_size = 4096
     a, b = initialize_data(matrix_size)
 
     start_event = torch.cuda.Event(enable_timing=True)
