@@ -6,14 +6,14 @@ import torch
 from collections import Counter
 
 # Define CUDA kernel
-kernel_code = """
+simd_code = """
 __device__ unsigned int __smid(void) {
      unsigned int ret;
      asm("mov.u32 %0, %%smid;" : "=r"(ret));
      return ret;
 }
 
-extern "C" __global__ void write_smid(int *d_sm_ids, int size) {
+extern "C" __global__ void my_func(int *d_sm_ids, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < size) {
         d_sm_ids[idx] = __smid();
@@ -23,7 +23,7 @@ extern "C" __global__ void write_smid(int *d_sm_ids, int size) {
 
 
 # Compile the CUDA kernel
-def compile_kernel():
+def compile_kernel(kernel_code: str):
     prog = CHECK_CUDA(nvrtc.nvrtcCreateProgram(str.encode(kernel_code), b"smid.cu", 0, [], []))
     opts = [b"--fmad=false", b"--gpu-architecture=sm_90"]
     try:
@@ -41,7 +41,7 @@ def compile_kernel():
 
     ptx = np.char.array(ptx)
     module = CHECK_CUDA(cuda.cuModuleLoadData(ptx.ctypes.data))
-    return CHECK_CUDA(cuda.cuModuleGetFunction(module, b"write_smid"))
+    return CHECK_CUDA(cuda.cuModuleGetFunction(module, b"my_func"))
 
 
 # Launch SMID kernel
@@ -58,7 +58,7 @@ def launch_smid(h_sm_ids, num_sm, stream=None):
     threads_per_block = 1
     blocks_per_grid = num_sm
 
-    kernel = compile_kernel()
+    kernel = compile_kernel(simd_code)
 
     # Prepare kernel arguments
     d_sm_ids_arg = np.array([int(d_sm_ids)], dtype=np.uint64)
@@ -91,3 +91,23 @@ def count_sm_ids(num_sm: int):
     launch_smid(h_sm_ids, num_sm, stream=None)
     torch.cuda.synchronize()
     return Counter(sorted(h_sm_ids))
+
+crash_code = """
+__device__ void __crash(void) {
+    // Force illegal memory access by dereferencing null pointer
+    volatile int* ptr = nullptr;
+    *ptr = 42; // This will cause illegal memory access
+}
+
+extern "C" __global__ void my_func(void) {
+    __crash();
+}
+"""
+
+def run_crash_kernel(stream=None):
+    kernel = compile_kernel(crash_code)
+    CHECK_CUDA(cuda.cuLaunchKernel(
+        kernel,
+        1, 1, 1, 1, 1, 1, 0, stream, None, 0
+    ))
+

@@ -3,7 +3,9 @@ name = "green_ctx"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 dependencies = [
     "cuda-python>=12.6.0",
+    "nvmath-python",
+    "torch",
 ]

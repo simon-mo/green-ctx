@@ -42,6 +42,12 @@ class GreenContext:
         yield
         cuda.cuCtxPopCurrent()
 
+    def enter(self):
+        cuda.cuCtxPushCurrent(self.primary_context)
+
+    def exit(self):
+        cuda.cuCtxPopCurrent()
+
     def make_stream(self):
         stream = CHECK_CUDA(
             cuda.cuGreenCtxStreamCreate(

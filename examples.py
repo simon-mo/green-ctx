@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from green_ctx import make_shard, init, partition, get_sms_in_range
-from green_ctx.kernels import count_sm_ids, launch_smid
+from green_ctx.kernels import count_sm_ids, launch_smid, run_crash_kernel
 from green_ctx.timing import cuda_timing_decorator
 from green_ctx.utils import print_current_context_id
 
@@ -181,6 +181,23 @@ def check_get_sms_in_range():
     else:
         print("No overlaps in sm_ids between the two contexts.")
 
+def no_fault_isolation():
+    print("---\nExample showcasing no fault isolation")
+    green_ctx_1, green_ctx_2 = partition(8, 8)
+
+    with green_ctx_1.with_context():
+        run_crash_kernel()
+        try:
+            torch.cuda.synchronize()
+        except RuntimeError as e:
+            # check that error is CUDA error: an illegal memory access was encountered
+            assert "CUDA error: an illegal memory access was encountered" in str(e)
+            print("Crash kernel triggered an exception", e)
+
+    with green_ctx_2.with_context():
+        _ = torch.randn(1024, 1024).cuda() # this still fail
+        torch.cuda.synchronize()
+
 
 
 
@@ -192,6 +209,8 @@ def main():
     partition_with_torch()
     benchmark_set_context()
     check_get_sms_in_range()
+
+    # no_fault_isolation()
 
 
 if __name__ == "__main__":
