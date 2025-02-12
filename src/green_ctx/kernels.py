@@ -90,7 +90,7 @@ def count_sm_ids(num_sm: int):
     h_sm_ids = np.zeros(num_sm, dtype=np.int32)
     launch_smid(h_sm_ids, num_sm, stream=None)
     torch.cuda.synchronize()
-    return Counter(sorted(h_sm_ids))
+    return Counter(sorted(h_sm_ids.tolist()))
 
 crash_code = """
 __device__ void __crash(void) {

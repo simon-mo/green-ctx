@@ -4,9 +4,6 @@ from typing import List
 import statistics
 import numpy as np
 from green_ctx import init, partition
-from green_ctx.kernels import run_crash_kernel
-
-test_crash = True
 
 def matmul_benchmark(thread_id: int, shared_dict, barrier):
 
@@ -25,9 +22,6 @@ def matmul_benchmark(thread_id: int, shared_dict, barrier):
 
     # Wait for both processes to be ready
     barrier.wait()
-
-    if test_crash and thread_id == 0:
-        run_crash_kernel()
 
     # Benchmark
     times = []
@@ -68,10 +62,7 @@ def main():
         p.join()
 
     # Convert shared dict to regular results list
-    if test_crash:
-        results = [shared_dict[i] for i in range(1, num_processes)]
-    else:
-        results = [shared_dict[i] for i in range(num_processes)]
+    results = [shared_dict[i] for i in range(num_processes)]
 
     # Print results
     print("\nResults Summary:")
