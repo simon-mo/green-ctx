@@ -14,23 +14,30 @@
 
 namespace py = pybind11;
 
+/**
+ * @brief Python bindings for CUPTI PM Sampling functionality
+ *
+ * This class provides a Python-friendly interface to the CUPTI PM sampling
+ * features, allowing performance metric sampling of CUDA workloads from Python
+ * code.
+ */
 class PmSampler {
 public:
   /**
-   * Constructor:
-   *   1) Initializes CUDA and CUPTI for the given device index.
-   *   2) Discovers the chip name and counter availability image.
-   *   3) Sets up the CuptiProfilerHost so that we can later create config
-   * images, query metrics, etc.
+   * @brief Constructor
+   *
+   * Initializes CUDA and CUPTI for the given device index, discovers chip name
+   * and counter availability, and sets up the profiler host.
+   *
+   * @param deviceIndex CUDA device index to profile
+   * @throws std::runtime_error if initialization fails
    */
   PmSampler(int deviceIndex) : m_deviceIndex(deviceIndex) {
-    // Initialize the CUDA driver
+    // Initialize CUDA driver
     DRIVER_API_CALL(cuInit(0));
-
-    // Retrieve the device handle
     DRIVER_API_CALL(cuDeviceGet(&m_cuDevice, deviceIndex));
 
-    // Some basic device checks (optional). For example, check device support:
+    // Check device support
     {
       CUpti_Profiler_DeviceSupported_Params params = {
           CUpti_Profiler_DeviceSupported_Params_STRUCT_SIZE};
@@ -43,36 +50,32 @@ public:
       }
     }
 
-    // Grab the chip name
+    // Get chip name and counter availability
     std::string chipName;
     CuptiPmSampling::GetChipName(deviceIndex, chipName);
-
-    // Grab the counter availability image
     CuptiPmSampling::GetCounterAvailabilityImage(deviceIndex,
                                                  m_counterAvailability);
 
-    // Set up the CuptiProfilerHost for this chip and availability image
+    // Set up the profiler host
     m_profilerHost.SetUp(chipName, m_counterAvailability);
   }
 
   /**
-   * Destructor:
-   *   1) Ensure we disable sampling (if still active).
-   *   2) Teardown the CuptiPmSampling and CuptiProfilerHost.
+   * @brief Destructor
+   *
+   * Ensures sampling is disabled and resources are cleaned up.
    */
   ~PmSampler() {
-    // If sampling is enabled, disable it
     if (m_samplingEnabled) {
       disable_sampling();
     }
-    // Tear down the profiler host if it was set up
     m_profilerHost.TearDown();
   }
 
   /**
-   * query_base_metrics():
-   *   - Returns a list of all base metrics reported by the CUPTI profiler for
-   * this device.
+   * @brief Query available base metrics
+   *
+   * @return List of available base metric names
    */
   std::vector<std::string> query_base_metrics() {
     std::vector<std::string> metrics;
@@ -81,9 +84,10 @@ public:
   }
 
   /**
-   * query_metric_properties():
-   *   - For each metric name, return a dictionary of { "description": ...,
-   * "type": ... }.
+   * @brief Query properties of specific metrics
+   *
+   * @param metricNames List of metric names to query
+   * @return Dictionary mapping metric names to their properties
    */
   std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
   query_metric_properties(const std::vector<std::string> &metricNames) {
@@ -96,7 +100,6 @@ public:
       std::string description;
       m_profilerHost.GetMetricProperties(metric, metricType, description);
 
-      // Convert metric type to string
       std::string metricTypeStr;
       switch (metricType) {
       case CUPTI_METRIC_TYPE_COUNTER:
@@ -123,40 +126,36 @@ public:
   }
 
   /**
-   * enable_sampling(metrics, sampling_interval, hardware_buffer_size,
-   * max_samples): 1) Create the config image for the given set of metrics. 2)
-   * Initialize and enable PM sampling for the device. 3) Set the config
-   * (interval, buffer size, etc.). 4) Create the counter data image that will
-   * store the samples.
+   * @brief Enable PM sampling for specified metrics
+   *
+   * @param metrics List of metrics to sample
+   * @param samplingInterval Sampling interval in GPU sysclk cycles
+   * @param hardwareBufferSize Size of hardware buffer in bytes
+   * @param maxSamples Maximum number of samples to store
    */
   void enable_sampling(const std::vector<std::string> &metrics,
-                       uint64_t samplingInterval = 100000, // 100us
+                       uint64_t samplingInterval = 100000,
                        size_t hardwareBufferSize = 512ULL * 1024ULL * 1024ULL,
                        uint64_t maxSamples = 10000) {
     if (m_samplingEnabled)
       throw std::runtime_error("Sampling is already enabled.");
 
     // Convert std::vector<std::string> to std::vector<const char*>
-    // We need to keep these strings in memory, so store them in a member
     m_metrics = metrics;
     m_metricPointers.clear();
     m_metricPointers.reserve(metrics.size());
     for (auto &m : m_metrics)
       m_metricPointers.push_back(m.c_str());
 
-    // 1. Create config image
+    // Create config image
     m_profilerHost.CreateConfigImage(m_metricPointers, m_configImage);
 
-    // 2. Initialize the CuptiPmSampling object
+    // Initialize PM sampling
     m_pmSampler.SetUp(m_deviceIndex);
-
-    // 3. Enable PM sampling
     m_pmSampler.EnablePmSampling(m_deviceIndex);
-
-    // 4. Set config (interval, buffer, etc.)
     m_pmSampler.SetConfig(m_configImage, hardwareBufferSize, samplingInterval);
 
-    // 5. Create counter data image
+    // Create counter data image
     m_pmSampler.CreateCounterDataImage(maxSamples, m_metricPointers,
                                        m_counterDataImage);
 
@@ -164,8 +163,7 @@ public:
   }
 
   /**
-   * disable_sampling():
-   *   - Disable PM sampling and tear down the CuptiPmSampling object.
+   * @brief Disable PM sampling and clean up resources
    */
   void disable_sampling() {
     if (!m_samplingEnabled)
@@ -176,8 +174,8 @@ public:
   }
 
   /**
-   * start_sampling():
-   *   - Simply call start on the PM sampling.
+   * @brief Start collecting samples
+   * @throws std::runtime_error if sampling is not enabled
    */
   void start_sampling() {
     if (!m_samplingEnabled)
@@ -187,8 +185,8 @@ public:
   }
 
   /**
-   * stop_sampling():
-   *   - Stop the PM sampling (so that no new samples come in).
+   * @brief Stop collecting samples
+   * @throws std::runtime_error if sampling is not enabled
    */
   void stop_sampling() {
     if (!m_samplingEnabled)
@@ -198,33 +196,20 @@ public:
   }
 
   /**
-   * get_samples():
-   *   - Decode the data in the counterDataImage, retrieving all completed
-   * samples.
-   *   - For each completed sample, EvaluateCounterData and build a
-   * Python-friendly structure:
-   *       {
-   *           "startTimestamp": <uint64_t>,
-   *           "endTimestamp":   <uint64_t>,
-   *           "metrics":        { "metric_name": <value>, ... }
-   *       }
-   *   - Then reset (so that future calls to get_samples() will fetch newly
-   * accumulated samples).
-   *   - Return a list of samples.
+   * @brief Get collected samples
    *
-   * Note: For a "continuous" scenario you'd typically call decode repeatedly
-   *       (perhaps on another thread) to not overflow the internal hardware
-   * buffer.
+   * @return List of samples, each containing timestamps and metric values
+   * @throws std::runtime_error if sampling is not enabled
    */
   std::vector<py::dict> get_samples() {
     if (!m_samplingEnabled)
       throw std::runtime_error(
           "Sampling has not been enabled. Call enable_sampling() first.");
 
-    // 1. Decode the data
+    // Decode the data
     CUPTI_API_CALL(m_pmSampler.DecodePmSamplingData(m_counterDataImage));
 
-    // 2. Get info on how many samples are completed
+    // Get info on completed samples
     CUpti_PmSampling_GetCounterDataInfo_Params counterDataInfo{
         CUpti_PmSampling_GetCounterDataInfo_Params_STRUCT_SIZE};
     counterDataInfo.pCounterDataImage = m_counterDataImage.data();
@@ -237,15 +222,13 @@ public:
           std::string("cuptiPmSamplingGetCounterDataInfo failed: ") + errstr);
     }
 
-    // 3. Evaluate the samples, gather them in a list
+    // Process samples
     std::vector<py::dict> samples;
     samples.reserve(counterDataInfo.numCompletedSamples);
 
     for (size_t sampleIndex = 0;
          sampleIndex < counterDataInfo.numCompletedSamples; ++sampleIndex) {
-      // We'll reuse the EvaluateCounterData logic from CuptiProfilerHost,
-      // but we also need to retrieve timestamps from
-      // cuptiPmSamplingCounterDataGetSampleInfo.
+      // Get sample timestamps
       CUpti_PmSampling_CounterData_GetSampleInfo_Params getSampleInfoParams = {
           CUpti_PmSampling_CounterData_GetSampleInfo_Params_STRUCT_SIZE};
       getSampleInfoParams.pPmSamplingObject = m_pmSampler.GetPmSamplerObject();
@@ -255,7 +238,7 @@ public:
       CUPTI_API_CALL(
           cuptiPmSamplingCounterDataGetSampleInfo(&getSampleInfoParams));
 
-      // Evaluate the metric values
+      // Evaluate metric values
       std::vector<double> metricValues(m_metricPointers.size());
       CUpti_Profiler_Host_EvaluateToGpuValues_Params evaluateParams{
           CUpti_Profiler_Host_EvaluateToGpuValues_Params_STRUCT_SIZE};
@@ -269,35 +252,28 @@ public:
 
       CUPTI_API_CALL(cuptiProfilerHostEvaluateToGpuValues(&evaluateParams));
 
-      // Build a Python dict
+      // Build Python dict
       py::dict sample;
       sample["startTimestamp"] = getSampleInfoParams.startTimestamp;
       sample["endTimestamp"] = getSampleInfoParams.endTimestamp;
 
-      // Build the metrics sub-dict
       py::dict metricDict;
       for (size_t i = 0; i < m_metricPointers.size(); i++) {
-        // metric name as key, value as double
         metricDict[m_metricPointers[i]] = metricValues[i];
       }
       sample["metrics"] = metricDict;
       samples.push_back(sample);
     }
 
-    // 4. Reset the counter data image for future sampling
+    // Reset for next batch
     m_pmSampler.ResetCounterDataImage(m_counterDataImage);
 
     return samples;
   }
 
 private:
-  // Helper to get the underlying CUPTI profiler host object pointer.
-  // (We rely on CuptiProfilerHost having a small accessor or store the pointer
-  // as needed.)
+  // Helper to get the profiler host object
   CUpti_Profiler_Host_Object *m_profilerHostObject() {
-    // We'll do a small hack: we rely on CuptiProfilerHost storing it in a
-    // private field but we have a small accessor if needed. Let's add a small
-    // method:
     return m_profilerHost.GetHostObject();
   }
 
@@ -309,13 +285,12 @@ private:
   CuptiProfilerHost m_profilerHost;
   CuptiPmSampling m_pmSampler;
 
-  // Storage for the config image and the sampled data
+  // Storage for configuration and data
   std::vector<uint8_t> m_counterAvailability;
   std::vector<uint8_t> m_configImage;
   std::vector<uint8_t> m_counterDataImage;
 
-  // A copy of user-provided metric names and pointers (lifetime must outlast
-  // usage).
+  // Storage for metric names and pointers
   std::vector<std::string> m_metrics;
   std::vector<const char *> m_metricPointers;
 };
@@ -324,7 +299,7 @@ private:
 // PYBIND11 MODULE DEFINITION
 // -------------------------------------------
 PYBIND11_MODULE(pm_sampling, m) {
-  m.doc() = "Python bindings for NVIDIA CUPTI PM Sampling (example)";
+  m.doc() = "Python bindings for NVIDIA CUPTI PM Sampling";
 
   py::class_<PmSampler>(m, "PmSampler")
       .def(py::init<int>(), py::arg("device_index") = 0,
