@@ -25,18 +25,23 @@ def main():
                  "gpu__time_duration.sum"],
         sampling_interval=200000,           # 100us
         hardware_buffer_size=512*1024*1024, # 512MB
-        max_samples=10
+        max_samples=10000
     )
 
     # Start sampling
     sampler.start_sampling()
 
+    all_samples = []
+
     # -----------------------------------------------
     import torch
-    N = 50000
-    a = torch.arange(N, dtype=torch.int32, device='cuda')
-    b = torch.arange(N, dtype=torch.int32, device='cuda')
-    c = a + b  # vector add
+    N = 1000
+    a = torch.randn(N, N, device='cuda')
+    b = torch.randn(N, N, device='cuda')
+    for i in range(100):
+        c = torch.matmul(a, b)
+        if i % 10 == 0:
+            all_samples.extend(sampler.get_samples())
     torch.cuda.synchronize()
     # -----------------------------------------------
 
@@ -44,7 +49,7 @@ def main():
     sampler.stop_sampling()
 
     # Fetch the collected samples
-    all_samples = sampler.get_samples()
+    all_samples.extend(sampler.get_samples())
     print(f"Collected {len(all_samples)} samples.")
     print("Printing up to first 5 samples:")
     for i, sample in enumerate(all_samples):
