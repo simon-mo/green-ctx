@@ -1,0 +1,24 @@
+list:
+    @just --list
+
+build:
+    nvcc -I/usr/local/cuda-12.8/extras/CUPTI/include \
+        -L/usr/local/cuda-12.8/extras/CUPTI/lib64 \
+        -lcupti \
+        -lcuda \
+        -o pm_sample \
+        pm_sampling.cu
+
+run +args:
+    sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 ./pm_sample {{args}}
+
+clean:
+    rm -f pm_sample
+
+build-bindings:
+    mkdir -p build && cd build && cmake .. && make -j
+
+run-bindings: build-bindings
+    cp build/pm_sampling.so .
+    sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 ../.venv/bin/python example.py
+    # sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 gdb ../.venv/bin/python --args example.py
