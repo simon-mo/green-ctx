@@ -22,3 +22,7 @@ run-bindings: build-bindings
     cp build/pm_sampling.so .
     sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 ../.venv/bin/python example.py
     # sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 gdb ../.venv/bin/python --args example.py
+
+run-vllm: build-bindings
+    cp build/pm_sampling.so .
+    sudo LD_LIBRARY_PATH=/usr/local/cuda/extras/CUPTI/lib64 /home/xmo/.venv/bin/python example-vllm.py

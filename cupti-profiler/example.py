@@ -10,11 +10,23 @@ def main():
     # Query some metrics
     base_metrics = sampler.query_base_metrics()
     print("Number of base metrics:", len(base_metrics))
-    print("First 5 base metrics:", base_metrics[:5])
+    props = sampler.query_metric_properties(base_metrics)
+    for metric in base_metrics:
+        print(f"{metric} -> {props[metric]}")
+    return
 
+    metrics = [
+        "gr__cycles_active.avg",
+        "gr__cycles_elapsed.max",
+        "sm__cycles_active.avg.pct_of_peak_sustained_elapsed",
+        "tpc__warps_inactive_sm_active_realtime.avg.pct_of_peak_sustained_elapsed",
+        "tpc__warps_inactive_sm_idle_realtime.avg.pct_of_peak_sustained_elapsed",
+        "dramc__read_throughput.avg.pct_of_peak_sustained_elapsed",
+        "dramc__write_throughput.avg.pct_of_peak_sustained_elapsed",
+    ]
     # Query the property (description and type) of a couple metrics
     metric_info = sampler.query_metric_properties(
-        ["gr__cycles_active.avg", "gr__cycles_elapsed.max"]
+        metrics
     )
     print("Metric info:")
     for metric, props in metric_info.items():
@@ -22,11 +34,7 @@ def main():
 
     # Now enable sampling for a subset of metrics
     sampler.enable_sampling(
-        metrics=[
-            "gr__cycles_active.avg",
-            "gr__cycles_elapsed.max",
-            "gpu__time_duration.sum",
-        ],
+        metrics=metrics,
         sampling_interval=200000,  # 100us
         hardware_buffer_size=512 * 1024 * 1024,  # 512MB
         max_samples=10000,

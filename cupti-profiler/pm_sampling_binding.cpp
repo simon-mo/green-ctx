@@ -222,6 +222,10 @@ public:
           std::string("cuptiPmSamplingGetCounterDataInfo failed: ") + errstr);
     }
 
+    if (counterDataInfo.numCompletedSamples == m_counterDataImage.size()) {
+      throw std::runtime_error("Data loss: numCompletedSamples is at the maxSamples.");
+    }
+
     // Process samples
     std::vector<py::dict> samples;
     samples.reserve(counterDataInfo.numCompletedSamples);
