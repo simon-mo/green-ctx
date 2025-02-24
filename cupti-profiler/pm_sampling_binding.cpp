@@ -275,6 +275,22 @@ public:
     return samples;
   }
 
+  std::string get_metric_type(const std::string& metric_name) {
+    return m_profilerHost.GetMetricsType(metric_name);
+  }
+
+  /**
+   * @brief Query sub-metrics for a given metric
+   *
+   * @param metric_name Name of the metric to query sub-metrics for
+   * @return List of sub-metric names
+   */
+  std::vector<std::string> query_sub_metrics(const std::string& metric_name) {
+    std::vector<std::string> sub_metrics;
+    m_profilerHost.GetSubMetrics(metric_name, sub_metrics);
+    return sub_metrics;
+  }
+
 private:
   // Helper to get the profiler host object
   CUpti_Profiler_Host_Object *m_profilerHostObject() {
@@ -329,6 +345,12 @@ PYBIND11_MODULE(pm_sampling, m) {
                     ...
                   }
              )pbdoc")
+      .def("query_sub_metrics", &PmSampler::query_sub_metrics,
+           py::arg("metric_name"),
+           R"pbdoc(
+                Return a list of sub-metrics for the given metric name.
+                This is useful for understanding the components that make up a composite metric.
+             )pbdoc")
       .def("enable_sampling", &PmSampler::enable_sampling, py::arg("metrics"),
            py::arg("sampling_interval") = 100000,
            py::arg("hardware_buffer_size") = 512ULL * 1024ULL * 1024ULL,
@@ -365,5 +387,10 @@ PYBIND11_MODULE(pm_sampling, m) {
                   }
                 The counter data image is reset after this call, so subsequent
                 calls will fetch fresh data.
+             )pbdoc")
+      .def("get_metric_type", &PmSampler::get_metric_type,
+           py::arg("metric_name"),
+           R"pbdoc(
+                Return the type of the given metric.
              )pbdoc");
 }

@@ -226,11 +226,55 @@ public:
         CUpti_Profiler_Host_GetMetricProperties_Params_STRUCT_SIZE};
     getMetricPropertiesParams.pHostObject = m_pHostObject;
     getMetricPropertiesParams.pMetricName = metricName.c_str();
-    CUPTI_API_CALL(
-        cuptiProfilerHostGetMetricProperties(&getMetricPropertiesParams));
-    metricType = getMetricPropertiesParams.metricType;
-    metricDescription = getMetricPropertiesParams.pDescription;
-    return CUPTI_SUCCESS;
+
+    CUptiResult result = cuptiProfilerHostGetMetricProperties(&getMetricPropertiesParams);
+    if (result == CUPTI_SUCCESS) {
+      metricType = getMetricPropertiesParams.metricType;
+      metricDescription = getMetricPropertiesParams.pDescription;
+    }
+    return result;
+  }
+
+  /**
+   * @brief Determine metric type by testing different suffixes
+   * @param metricName Base name of the metric to test
+   * @return CUpti_MetricType indicating the determined type
+   */
+  std::string GetMetricsType(const std::string& metricName) {
+    CUpti_MetricType metricType;
+    std::string description;
+
+    // Try Counter suffix
+    if (GetMetricProperties(metricName + ".sum", metricType, description) == CUPTI_SUCCESS) {
+      return "Counter";
+    }
+
+    // Try Ratio suffix
+    if (GetMetricProperties(metricName + ".ratio", metricType, description) == CUPTI_SUCCESS) {
+      return "Ratio";
+    }
+
+    // Try Throughput suffix
+    if (GetMetricProperties(metricName + ".avg.pct_of_peak_sustained_elapsed", metricType, description) == CUPTI_SUCCESS) {
+      return "Throughput";
+    }
+
+    // If no suffix worked, try getting properties of base metric
+    if (GetMetricProperties(metricName, metricType, description) == CUPTI_SUCCESS) {
+      switch (metricType) {
+        case CUPTI_METRIC_TYPE_COUNTER:
+          return "Counter";
+        case CUPTI_METRIC_TYPE_RATIO:
+          return "Ratio";
+        case CUPTI_METRIC_TYPE_THROUGHPUT:
+          return "Throughput";
+        default:
+          return "Unknown";
+      }
+    }
+
+    // Default case if metric type cannot be determined
+    return "Unknown";
   }
 
   /**

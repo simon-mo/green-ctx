@@ -10,10 +10,28 @@ def main():
     # Query some metrics
     base_metrics = sampler.query_base_metrics()
     print("Number of base metrics:", len(base_metrics))
-    props = sampler.query_metric_properties(base_metrics)
+
+    suffix = {
+        "Counter": ".avg",
+        "Ratio": ".pct",
+        "Throughput": ".avg.pct_of_peak_sustained_elapsed",
+    }
+    full_metrics = []
     for metric in base_metrics:
-        print(f"{metric} -> {props[metric]}")
-    return
+        metric_type = sampler.get_metric_type(metric)
+        full_name = f"{metric}{suffix[metric_type]}"
+        full_metrics.append(full_name)
+
+    props = sampler.query_metric_properties(full_metrics)
+    data = []
+    for i in range(len(full_metrics)):
+        data.append({
+            "name": base_metrics[i],
+            "type": metric_type,
+            "description": props[full_metrics[i]]["description"],
+        })
+    import pandas as pd
+    pd.DataFrame(data).to_csv("metrics.csv", index=False)
 
     metrics = [
         "gr__cycles_active.avg",
@@ -31,6 +49,7 @@ def main():
     print("Metric info:")
     for metric, props in metric_info.items():
         print(f"  {metric} -> {props}")
+    # return
 
     # Now enable sampling for a subset of metrics
     sampler.enable_sampling(
