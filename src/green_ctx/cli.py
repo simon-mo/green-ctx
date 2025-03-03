@@ -7,6 +7,8 @@ import sys
 from .server.server import GPUServer
 from .client.client import GPUClient
 
+
+
 app = typer.Typer()
 console = Console()
 
@@ -17,11 +19,10 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 @app.command()
-def server(port: int = typer.Option(5555, help="Port to listen on")):
+def server(port: int = typer.Option(50051, help="Port to listen on")):
     """Start the GPU multiplexer server."""
     try:
         server = GPUServer(port=port)
-        console.print(f"[green]Starting GPU multiplexer server on port {port}[/green]")
         server.start()
     except Exception as e:
         console.print(f"[red]Error starting server: {e}[/red]")
@@ -29,7 +30,7 @@ def server(port: int = typer.Option(5555, help="Port to listen on")):
 
 @app.command()
 def status(host: str = typer.Option("localhost", help="Server host"),
-           port: int = typer.Option(5555, help="Server port")):
+           port: int = typer.Option(50051, help="Server port")):
     """Check the status of the GPU multiplexer server."""
     try:
         client = GPUClient(host=host, port=port)

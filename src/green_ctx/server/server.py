@@ -1,154 +1,156 @@
-import zmq
-from typing import List, Dict, Any
-from pydantic import BaseModel
-import json
 import logging
+import pickle
+from concurrent import futures
 from dataclasses import dataclass
-import numpy as np
+from typing import Dict, List
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+import grpc
+import torch
+from torch.multiprocessing.reductions import reduce_tensor
+
+from ..proto import gpu_service_pb2
+from ..proto import gpu_service_pb2_grpc
+
 logger = logging.getLogger(__name__)
 
 # Default server configuration
-DEFAULT_PORT = 5555
+DEFAULT_PORT = 50051
 
-# Message types for client-server communication
-class RequestMessage(BaseModel):
-    command: str
-    params: Dict[str, Any]
-
-class ResponseMessage(BaseModel):
-    success: bool
-    data: Any
-    error: str = ""
+DTYPE_MAP = {
+    "bfoat16": torch.bfloat16,
+    "float16": torch.float16,
+    "float32": torch.float32,
+}
 
 @dataclass
-class Tensor:
+class TensorMetadata:
     shape: tuple
     dtype: str
     name: str
-    handle: int  # Simulated GPU memory handle
+    serialized_info: bytes  # Serialized GPU memory information
+    value: torch.Tensor
 
-class GPUServer:
-    def __init__(self, port: int = DEFAULT_PORT):
-        self.port = port
-        self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REP)
-
+class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
+    def __init__(self):
         # Initialize resource tracking
         self.total_sms = 132
         self.available_sms = list(range(self.total_sms))
-        self.allocated_sms: Dict[int, List[int]] = {}  # client_id -> sm_indices
-        self.tensors: Dict[str, Tensor] = {}
+        self.allocated_sms: Dict[str, List[int]] = {}  # client_id -> sm_indices
+        self.tensors: Dict[str, TensorMetadata] = {}
 
+        torch.cuda.set_device(0)
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
 
-    def start(self):
-        """Start the server and listen for requests."""
-        self.socket.bind(f"tcp://*:{self.port}")
-        logger.info(f"Server listening on port {self.port}")
-
-        while True:
-            try:
-                message = self.socket.recv_string()
-                request = RequestMessage.model_validate_json(message)
-                response = self.handle_request(request)
-                self.socket.send_string(response.model_dump_json())
-            except Exception as e:
-                logger.error(f"Error handling request: {e}")
-                error_response = ResponseMessage(success=False, data=None, error=str(e))
-                self.socket.send_string(error_response.model_dump_json())
-
-    def handle_request(self, request: RequestMessage) -> ResponseMessage:
-        """Handle incoming client requests."""
-        command = request.command
-        params = request.params
-
-        handlers = {
-            "health_check": self.health_check,
-            "request_exclusive_SMs": self.request_exclusive_SMs,
-            "free_SMs": self.free_SMs,
-            "alloc_tensor": self.alloc_tensor,
-            "free_tensor": self.free_tensor,
-            "get_tensor": self.get_tensor,
-        }
-
-        handler = handlers.get(command)
-        if not handler:
-            return ResponseMessage(success=False, data=None, error=f"Unknown command: {command}")
-
-        try:
-            result = handler(**params)
-            return ResponseMessage(success=True, data=result)
-        except Exception as e:
-            return ResponseMessage(success=False, data=None, error=str(e))
-
-    def health_check(self) -> Dict[str, Any]:
+    def HealthCheck(self, request, context):
         """Return server health status."""
-        return {
-            "status": "healthy",
-            "total_sms": self.total_sms,
-            "available_sms": len(self.available_sms),
-            "num_tensors": len(self.tensors)
-        }
+        return gpu_service_pb2.HealthCheckResponse(
+            status="healthy",
+            total_sms=self.total_sms,
+            available_sms=len(self.available_sms),
+            num_tensors=len(self.tensors)
+        )
 
-    def request_exclusive_SMs(self, num_sms: int, client_id: int) -> List[int]:
+    def RequestExclusiveSMs(self, request, context):
         """Allocate exclusive SMs to a client."""
+        num_sms = request.num_sms
+        client_id = request.client_id
+
         if num_sms > len(self.available_sms):
-            raise ValueError(f"Requested {num_sms} SMs but only {len(self.available_sms)} available")
+            context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,
+                        f"Requested {num_sms} SMs but only {len(self.available_sms)} available")
+        if num_sms % 8 != 0:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT,
+                        f"Requested {num_sms} SMs but must be a multiple of 8")
 
         allocated = self.available_sms[:num_sms]
         self.available_sms = self.available_sms[num_sms:]
         self.allocated_sms[client_id] = allocated
-        return allocated
 
-    def free_SMs(self, allocated_sms: List[int], client_id: int) -> bool:
+        logger.info(f"Allocated {num_sms} SMs to client {client_id}: {allocated}")
+        return gpu_service_pb2.RequestSMsResponse(allocated_sms=allocated)
+
+    def FreeSMs(self, request, context):
         """Free previously allocated SMs."""
+        client_id = request.client_id
+        allocated_sms = request.allocated_sms
+
         if client_id not in self.allocated_sms:
-            raise ValueError(f"Client {client_id} has no allocated SMs")
+            context.abort(grpc.StatusCode.NOT_FOUND,
+                        f"Client {client_id} has no allocated SMs")
 
         self.available_sms.extend(allocated_sms)
         del self.allocated_sms[client_id]
-        return True
 
-    def alloc_tensor(self, shape: List[int], dtype: str, name: str) -> Dict[str, Any]:
+        logger.info(f"Freed {len(allocated_sms)} SMs from client {client_id}: {allocated_sms}")
+        return gpu_service_pb2.FreeSMsResponse(success=True)
+
+    def AllocTensor(self, request, context):
         """Allocate a new tensor in GPU memory."""
-        if name in self.tensors:
-            raise ValueError(f"Tensor {name} already exists")
+        name = request.name
+        shape = tuple(map(int, request.shape))
+        dtype = request.dtype
 
-        handle = len(self.tensors) + 1  # Simulate a memory handle
-        tensor = Tensor(
+        if name in self.tensors:
+            context.abort(grpc.StatusCode.ALREADY_EXISTS,
+                        f"Tensor {name} already exists")
+
+        value = torch.empty(shape, dtype= DTYPE_MAP[dtype])
+        tensor = TensorMetadata(
             shape=tuple(shape),
             dtype=dtype,
             name=name,
-            handle=handle
+            serialized_info=pickle.dumps(reduce_tensor(value)),
+            value=value,
         )
         self.tensors[name] = tensor
-        return {
-            "handle": handle,
-            "name": name,
-            "shape": shape,
-            "dtype": dtype
-        }
 
-    def free_tensor(self, name: str) -> bool:
+        logger.info(f"Allocated tensor {name} ({shape}, {dtype})")
+        return gpu_service_pb2.TensorInfo(
+            name=name,
+            shape=shape,
+            dtype=dtype,
+            serialized_info=tensor.serialized_info
+        )
+
+    def FreeTensor(self, request, context):
         """Free a tensor from GPU memory."""
+        name = request.name
+
         if name not in self.tensors:
-            raise ValueError(f"Tensor {name} does not exist")
+            context.abort(grpc.StatusCode.NOT_FOUND,
+                        f"Tensor {name} does not exist")
 
         del self.tensors[name]
-        return True
+        logger.info(f"Freed tensor {name}")
+        return gpu_service_pb2.FreeTensorResponse(success=True)
 
-    def get_tensor(self, name: str) -> Dict[str, Any]:
+    def GetTensor(self, request, context):
         """Get tensor information by name."""
+        name = request.name
+
         if name not in self.tensors:
-            raise ValueError(f"Tensor {name} does not exist")
+            context.abort(grpc.StatusCode.NOT_FOUND,
+                        f"Tensor {name} does not exist")
 
         tensor = self.tensors[name]
-        return {
-            "handle": tensor.handle,
-            "name": tensor.name,
-            "shape": tensor.shape,
-            "dtype": tensor.dtype
-        }
+        logger.info(f"Got tensor {name} ({tensor.shape}, {tensor.dtype})")
+        return gpu_service_pb2.TensorInfo(
+            name=tensor.name,
+            shape=list(tensor.shape),
+            dtype=tensor.dtype,
+            serialized_info=tensor.serialized_info
+        )
+
+class GPUServer:
+    def __init__(self, port: int = DEFAULT_PORT):
+        self.port = port
+        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+        gpu_service_pb2_grpc.add_GPUServiceServicer_to_server(
+            GPUServicer(), self.server)
+
+    def start(self):
+        """Start the server and listen for requests."""
+        self.server.add_insecure_port(f'[::]:{self.port}')
+        self.server.start()
+        logger.info(f"Server listening on port {self.port}")
+        self.server.wait_for_termination()

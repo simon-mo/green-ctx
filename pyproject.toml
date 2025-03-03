@@ -8,17 +8,23 @@ authors = [
 ]
 dependencies = [
     "typer>=0.9.0",
-    "pydantic>=2.0.0",
     "pyzmq>=25.1.0",
     "rich>=13.0.0",
     "numpy>=1.24.0",
     "cuda-python",
     "nvmath-python",
-    "torch"
+    "torch",
+    "grpcio==1.59.3",
+    "grpcio-tools==1.59.3",
+    "protobuf==4.25.1",
+    "torch>=2.0.0",
+    "numpy>=1.24.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
 ]
 
 [project.scripts]
-gctx = "green_ctx.cli:app"
+gtx = "green_ctx.cli:app"
 
 [build-system]
 requires = ["hatchling"]

@@ -10,11 +10,10 @@ This example shows how to:
 
 import time
 from green_ctx.client.client import GPUClient
-import numpy as np
 
 def main():
-    # Create a client connection
-    client = GPUClient(host="localhost", port=5555)
+    # Create a client connection to the gRPC server
+    client = GPUClient(host="localhost", port=50051)
 
     try:
         # Check server health
@@ -23,8 +22,8 @@ def main():
         print(f"Server status: {status}")
 
         # Request exclusive SMs
-        print("\nRequesting 4 SMs...")
-        allocated_sms = client.request_exclusive_SMs(4)
+        print("\nRequesting 8 SMs...")
+        allocated_sms = client.request_exclusive_SMs(8)
         print(f"Allocated SMs: {allocated_sms}")
 
         # Allocate a tensor
