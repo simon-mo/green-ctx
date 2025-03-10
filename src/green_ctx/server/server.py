@@ -7,6 +7,7 @@ from typing import Dict, List
 import grpc
 import torch
 from torch.multiprocessing.reductions import reduce_tensor
+import uuid
 
 from ..proto import gpu_service_pb2
 from ..proto import gpu_service_pb2_grpc
@@ -33,20 +34,24 @@ class TensorMetadata:
 class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
     def __init__(self):
         # Initialize resource tracking
-        self.total_sms = 132
-        self.available_sms = list(range(self.total_sms))
-        self.allocated_sms: Dict[str, List[int]] = {}  # client_id -> sm_indices
+        self.total_sms = 120
+        self.total_groups = self.total_sms // 8
+        self.available_sms_group_indices = list(range(self.total_groups))
+        self.allocated_sms_group_indices: Dict[str, List[int]] = {}  # alloc_uuid -> sm_group_indices
         self.tensors: Dict[str, TensorMetadata] = {}
 
-        torch.cuda.set_device(0)
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
+
+    @property
+    def available_sms(self):
+        return len(self.available_sms_group_indices)*8
 
     def HealthCheck(self, request, context):
         """Return server health status."""
         return gpu_service_pb2.HealthCheckResponse(
             status="healthy",
             total_sms=self.total_sms,
-            available_sms=len(self.available_sms),
+            available_sms=self.available_sms,
             num_tensors=len(self.tensors)
         )
 
@@ -55,33 +60,42 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         num_sms = request.num_sms
         client_id = request.client_id
 
-        if num_sms > len(self.available_sms):
+        if num_sms > self.available_sms:
             context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED,
-                        f"Requested {num_sms} SMs but only {len(self.available_sms)} available")
+                        f"Requested {num_sms} SMs but only {self.available_sms} available")
         if num_sms % 8 != 0:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT,
                         f"Requested {num_sms} SMs but must be a multiple of 8")
 
-        allocated = self.available_sms[:num_sms]
-        self.available_sms = self.available_sms[num_sms:]
-        self.allocated_sms[client_id] = allocated
+        alloc_uuid = str(uuid.uuid4())
+        num_groups = num_sms // 8
 
-        logger.info(f"Allocated {num_sms} SMs to client {client_id}: {allocated}")
-        return gpu_service_pb2.RequestSMsResponse(allocated_sms=allocated)
+        allocated_group_indices = self.available_sms_group_indices[:num_groups]
+        self.available_sms_group_indices = self.available_sms_group_indices[num_groups:]
+        self.allocated_sms_group_indices[alloc_uuid] = allocated_group_indices
+
+        logger.info(f"Allocated {num_sms} SMs to client {client_id}: {allocated_group_indices}")
+        return gpu_service_pb2.RequestSMsResponse(
+            alloc_uuid=alloc_uuid,
+            num_groups=self.total_groups,
+            min_size=8,
+            indices=allocated_group_indices,
+            get_remainder=False
+        )
 
     def FreeSMs(self, request, context):
         """Free previously allocated SMs."""
-        client_id = request.client_id
-        allocated_sms = request.allocated_sms
+        alloc_uuid = request.alloc_uuid
 
-        if client_id not in self.allocated_sms:
+        if alloc_uuid not in self.allocated_sms_group_indices:
             context.abort(grpc.StatusCode.NOT_FOUND,
-                        f"Client {client_id} has no allocated SMs")
+                        f"Alloc UUID {alloc_uuid} has no allocated SMs")
 
-        self.available_sms.extend(allocated_sms)
-        del self.allocated_sms[client_id]
+        removed_group_indices = self.allocated_sms_group_indices[alloc_uuid]
+        self.available_sms_group_indices.extend(removed_group_indices)
+        del self.allocated_sms_group_indices[alloc_uuid]
 
-        logger.info(f"Freed {len(allocated_sms)} SMs from client {client_id}: {allocated_sms}")
+        logger.info(f"Freed {len(removed_group_indices)*8} SMs from alloc UUID {alloc_uuid}")
         return gpu_service_pb2.FreeSMsResponse(success=True)
 
     def AllocTensor(self, request, context):
@@ -91,15 +105,27 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         dtype = request.dtype
 
         if name in self.tensors:
-            context.abort(grpc.StatusCode.ALREADY_EXISTS,
-                        f"Tensor {name} already exists")
+            if request.get_if_exists:
+                return gpu_service_pb2.TensorInfo(
+                    name=name,
+                    shape=shape,
+                    dtype=dtype,
+                    serialized_info=self.tensors[name].serialized_info
+                )
+            else:
+                context.abort(grpc.StatusCode.ALREADY_EXISTS,
+                            f"Tensor {name} already exists")
 
-        value = torch.empty(shape, dtype= DTYPE_MAP[dtype])
+        value = torch.empty(shape, dtype=DTYPE_MAP[dtype], device="cuda")
+
+        reduced = pickle.dumps(reduce_tensor(value))
+        assert len(reduced) < 2*1024*1024, f"Tensor is too large to serialize ({len(reduced)} bytes)"
+
         tensor = TensorMetadata(
             shape=tuple(shape),
             dtype=dtype,
             name=name,
-            serialized_info=pickle.dumps(reduce_tensor(value)),
+            serialized_info=reduced,
             value=value,
         )
         self.tensors[name] = tensor

@@ -34,12 +34,15 @@ message RequestSMsRequest {
 }
 
 message RequestSMsResponse {
-  repeated int32 allocated_sms = 1;
+  string alloc_uuid = 1;
+  int32 num_groups = 2;
+  int32 min_size = 3;
+  repeated int32 indices = 4;
+  bool get_remainder = 5;
 }
 
 message FreeSMsRequest {
-  repeated int32 allocated_sms = 1;
-  string client_id = 2;
+  string alloc_uuid = 1;
 }
 
 message FreeSMsResponse {
@@ -58,6 +61,7 @@ message AllocTensorRequest {
   repeated int32 shape = 1;
   string dtype = 2;
   string name = 3;
+  bool get_if_exists = 4;
 }
 
 message FreeTensorRequest {

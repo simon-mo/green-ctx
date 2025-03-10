@@ -7,44 +7,71 @@ C is the local GPU memory.
 We will run the matmul many times and time it.
 """
 
-import time
-
-import numpy as np
+import torch
+import torch.multiprocessing as mp
 from green_ctx.client.client import GPUClient
 
 
-def main():
+def main(mp_barrier: mp.Barrier):
     # Create a client connection
     client = GPUClient(host="localhost", port=50051)
+
+    torch.set_default_device("cuda")
 
     try:
         status = client.health_check()
         print(f"Server status: {status}")
 
-        allocated_sms = client.request_exclusive_SMs(8)
-        print(f"Allocated SMs: {allocated_sms}")
+        alloc_uuid, gtx = client.request_exclusive_SMs(8)
+        gtx.enter()
+        print(f"Allocated SMs: {gtx.sm_ids}")
 
         # Allocate a tensor
-        tensor_info = client.alloc_tensor(
-            shape=[1024, 1024],
+        A = client.alloc_tensor(
+            shape=[1024, 61440],
             dtype="bfoat16",
         )
+        B = client.alloc_tensor(
+            shape=[61440, 1024],
+            dtype="bfoat16",
+            name="B",
+            get_if_exists=True,
+        )
+        C = torch.empty([1024, 1024], dtype=torch.bfloat16)
 
-
-        # Simulate some work
-        print("\nSimulating computation work...")
-        time.sleep(2)
+        # Perform the matmul and time it using cuda event
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(100):
+            torch.matmul(A, B, out=C)
+        end.record()
+        torch.cuda.synchronize()
+        print(f"Avg time for each matmul: {start.elapsed_time(end)/100} ms")
 
         # Clean up resources
         print("\nCleaning up resources...")
-        client.free_SMs(allocated_sms)
-
-        print("\nAll resources cleaned up successfully!")
+        gtx.exit()
+        client.free_SMs(alloc_uuid)
 
     except Exception as e:
         print(f"Error: {e}")
     finally:
         client.close()
 
+def run_multiple_workers():
+    num_workers = 1
+    barrier = mp.Barrier(num_workers)
+
+    workers = []
+    for _ in range(num_workers):
+        p = mp.Process(target=main, kwargs={"mp_barrier": barrier})
+        p.start()
+        workers.append(p)
+
+    for w in workers:
+        w.join()
+
 if __name__ == "__main__":
-    main()
+    # main()
+    run_multiple_workers()

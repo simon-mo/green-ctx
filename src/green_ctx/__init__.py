@@ -123,11 +123,48 @@ def get_sms_in_range(start: int, end: int, get_remainder: bool=False) -> GreenCo
         sm_count=green_sm_resource.sm.smCount, raw_context=green_ctx, primary_context=CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
     )
 
-    # print(gc.sm_ids)
-
     return gc
 
 
+def get_sms_by_spec(num_groups: int, min_size: int, indices: List[int], get_remainder: bool=False) -> GreenContext:
+    """gets SMs in range by the green context spec"""
+    sm_resource = CHECK_CUDA(
+        cuda.cuDeviceGetDevResource(
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
+        )
+    )
+
+    result_resources, _, remainder = CHECK_CUDA(
+        cuda.cuDevSmResourceSplitByCount(
+            num_groups,
+            sm_resource,
+            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            min_size,
+        )
+    )
+
+    selected_resources = [result_resources[idx] for idx in indices]
+    print(f"Selected resources at indices: {indices}")
+    if get_remainder:
+        selected_resources.append(remainder)
+
+    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(selected_resources, len(selected_resources)))
+    green_ctx = CHECK_CUDA(
+        cuda.cuGreenCtxCreate(
+            desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
+        )
+    )
+    green_sm_resource = CHECK_CUDA(
+        cuda.cuGreenCtxGetDevResource(
+            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
+        )
+    )
+
+    gc = GreenContext(
+        sm_count=green_sm_resource.sm.smCount, raw_context=green_ctx, primary_context=CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
+    )
+
+    return gc
 
 def make_shard(sm_request: int) -> GreenContext:
     assert (
