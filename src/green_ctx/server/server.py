@@ -167,6 +167,14 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             serialized_info=tensor.serialized_info
         )
 
+    def ExistTensor(self, request, context):
+        """Check if a tensor exists."""
+        name = request.name
+        if name in self.tensors:
+            return gpu_service_pb2.ExistTensorResponse(exists=True)
+        else:
+            return gpu_service_pb2.ExistTensorResponse(exists=False)
+
 class GPUServer:
     def __init__(self, port: int = DEFAULT_PORT):
         self.port = port

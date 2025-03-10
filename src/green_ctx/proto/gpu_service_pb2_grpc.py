@@ -45,6 +45,11 @@ class GPUServiceStub(object):
                 request_serializer=gpu__service__pb2.GetTensorRequest.SerializeToString,
                 response_deserializer=gpu__service__pb2.TensorInfo.FromString,
                 )
+        self.ExistTensor = channel.unary_unary(
+                '/green_ctx.proto.GPUService/ExistTensor',
+                request_serializer=gpu__service__pb2.ExistTensorRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.ExistTensorResponse.FromString,
+                )
 
 
 class GPUServiceServicer(object):
@@ -90,6 +95,12 @@ class GPUServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ExistTensor(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GPUServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -122,6 +133,11 @@ def add_GPUServiceServicer_to_server(servicer, server):
                     servicer.GetTensor,
                     request_deserializer=gpu__service__pb2.GetTensorRequest.FromString,
                     response_serializer=gpu__service__pb2.TensorInfo.SerializeToString,
+            ),
+            'ExistTensor': grpc.unary_unary_rpc_method_handler(
+                    servicer.ExistTensor,
+                    request_deserializer=gpu__service__pb2.ExistTensorRequest.FromString,
+                    response_serializer=gpu__service__pb2.ExistTensorResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -233,5 +249,22 @@ class GPUService(object):
         return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/GetTensor',
             gpu__service__pb2.GetTensorRequest.SerializeToString,
             gpu__service__pb2.TensorInfo.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def ExistTensor(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/ExistTensor',
+            gpu__service__pb2.ExistTensorRequest.SerializeToString,
+            gpu__service__pb2.ExistTensorResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

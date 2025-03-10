@@ -15,6 +15,7 @@ service GPUService {
   rpc AllocTensor(AllocTensorRequest) returns (TensorInfo) {}
   rpc FreeTensor(FreeTensorRequest) returns (FreeTensorResponse) {}
   rpc GetTensor(GetTensorRequest) returns (TensorInfo) {}
+  rpc ExistTensor(ExistTensorRequest) returns (ExistTensorResponse) {}
 }
 
 // Health check messages
@@ -74,4 +75,12 @@ message FreeTensorResponse {
 
 message GetTensorRequest {
   string name = 1;
+}
+
+message ExistTensorRequest {
+  string name = 1;
+}
+
+message ExistTensorResponse {
+  bool exists = 1;
 }

@@ -90,6 +90,12 @@ class GPUClient:
         deserializer, payload = pickle.loads(response.serialized_info)
         return deserializer(*payload)
 
+    def exists_tensor(self, name: str) -> bool:
+        """Check if a tensor exists."""
+        request = gpu_service_pb2.ExistTensorRequest(name=name)
+        response = self.stub.ExistTensor(request)
+        return response.exists
+
     def close(self):
         """Close the connection to the server."""
         for name in list(self.anon_tensors):

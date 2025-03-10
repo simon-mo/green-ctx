@@ -1,5 +1,5 @@
 """
-Example client that allocates 16 SMs and performs a matrix multiplication of A @ B = C.
+Example client that allocates 8 SMs and performs a matrix multiplication of A @ B = C.
 A is a 1024x1024 bf16 matrix exclusively allocated.
 B is a 1024x2 bf16 matrix shared by all workers by name "B".
 C is the local GPU memory.
@@ -31,6 +31,7 @@ def main(mp_barrier: mp.Barrier):
             shape=[1024, 61440],
             dtype="bfoat16",
         )
+        print(f"tensor B already exists: {client.exists_tensor('B')}")
         B = client.alloc_tensor(
             shape=[61440, 1024],
             dtype="bfoat16",
@@ -60,7 +61,7 @@ def main(mp_barrier: mp.Barrier):
         client.close()
 
 def run_multiple_workers():
-    num_workers = 1
+    num_workers = 8
     barrier = mp.Barrier(num_workers)
 
     workers = []
