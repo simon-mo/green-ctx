@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_PORT = 50051
 
 DTYPE_MAP = {
-    "bfoat16": torch.bfloat16,
+    "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float32": torch.float32,
 }

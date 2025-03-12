@@ -29,12 +29,12 @@ def main(mp_barrier: mp.Barrier):
         # Allocate a tensor
         A = client.alloc_tensor(
             shape=[1024, 61440],
-            dtype="bfoat16",
+            dtype="bfloat16",
         )
         print(f"tensor B already exists: {client.exists_tensor('B')}")
         B = client.alloc_tensor(
             shape=[61440, 1024],
-            dtype="bfoat16",
+            dtype="bfloat16",
             name="B",
             get_if_exists=True,
         )
