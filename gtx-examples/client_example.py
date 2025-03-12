@@ -23,8 +23,9 @@ def main():
 
         # Request exclusive SMs
         print("\nRequesting 8 SMs...")
-        allocated_sms = client.request_exclusive_SMs(8)
-        print(f"Allocated SMs: {allocated_sms}")
+        alloc_uuid, green_ctx = client.request_exclusive_SMs(8)
+        green_ctx.enter()
+        print(f"Allocated SMs: {green_ctx.sm_ids}")
 
         # Allocate a tensor
         print("\nAllocating tensor...")
@@ -42,12 +43,12 @@ def main():
 
         # Simulate some work
         print("\nSimulating computation work...")
-        time.sleep(2)
+        time.sleep(0.1)
 
         # Clean up resources
         print("\nCleaning up resources...")
         client.free_tensor("example_matrix")
-        client.free_SMs(allocated_sms)
+        client.free_SMs(alloc_uuid)
 
         print("\nAll resources cleaned up successfully!")
 
