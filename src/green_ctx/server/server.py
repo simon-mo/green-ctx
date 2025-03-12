@@ -3,6 +3,7 @@ import pickle
 from concurrent import futures
 from dataclasses import dataclass
 from typing import Dict, List
+from threading import Lock
 
 import grpc
 import torch
@@ -39,6 +40,8 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         self.available_sms_group_indices = list(range(self.total_groups))
         self.allocated_sms_group_indices: Dict[str, List[int]] = {}  # alloc_uuid -> sm_group_indices
         self.tensors: Dict[str, TensorMetadata] = {}
+        self.tensor_locks: Dict[str, Lock] = {}
+        self.global_lock = Lock()
 
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
 
@@ -147,6 +150,8 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
                         f"Tensor {name} does not exist")
 
         del self.tensors[name]
+        if name in self.tensor_locks:
+            del self.tensor_locks[name]
         logger.info(f"Freed tensor {name}")
         return gpu_service_pb2.FreeTensorResponse(success=True)
 
@@ -174,6 +179,34 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             return gpu_service_pb2.ExistTensorResponse(exists=True)
         else:
             return gpu_service_pb2.ExistTensorResponse(exists=False)
+
+    def LockTensor(self, request, context):
+        """Acquire exclusive access to a tensor by name.
+        Acquiring client will block until lock is free."""
+        name = request.name
+        
+        with self.global_lock:
+            if name not in self.tensor_locks:
+                self.tensor_locks[name] = Lock()
+        
+        self.tensor_locks[name].acquire()
+        return gpu_service_pb2.LockTensorResponse(success=True)
+
+    def UnlockTensor(self, request, context):
+        """Release exclusive access to a tensor by name.
+        Caller must be holding the lock."""
+        name = request.name
+
+        if name not in self.tensor_locks:
+            context.abort(grpc.StatusCode.NOT_FOUND,
+                        f"Tensor {name} does not exist")
+        
+        if not self.tensor_locks[name].locked():
+            context.abort(grpc.StatusCode.LOCK_NOT_HELD,
+                        f"Tensor {name} is not locked")
+        
+        self.tensor_locks[name].release()  # is this fine?
+        return gpu_service_pb2.UnlockTensorResponse(success=True)
 
 class GPUServer:
     def __init__(self, port: int = DEFAULT_PORT):

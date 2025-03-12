@@ -50,6 +50,16 @@ class GPUServiceStub(object):
                 request_serializer=gpu__service__pb2.ExistTensorRequest.SerializeToString,
                 response_deserializer=gpu__service__pb2.ExistTensorResponse.FromString,
                 )
+        self.LockTensor = channel.unary_unary(
+                '/green_ctx.proto.GPUService/LockTensor',
+                request_serializer=gpu__service__pb2.LockTensorRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.LockTensorResponse.FromString,
+                )
+        self.UnlockTensor = channel.unary_unary(
+                '/green_ctx.proto.GPUService/UnlockTensor',
+                request_serializer=gpu__service__pb2.UnlockTensorRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.UnlockTensorResponse.FromString,
+                )
 
 
 class GPUServiceServicer(object):
@@ -101,6 +111,18 @@ class GPUServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def LockTensor(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UnlockTensor(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GPUServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -138,6 +160,16 @@ def add_GPUServiceServicer_to_server(servicer, server):
                     servicer.ExistTensor,
                     request_deserializer=gpu__service__pb2.ExistTensorRequest.FromString,
                     response_serializer=gpu__service__pb2.ExistTensorResponse.SerializeToString,
+            ),
+            'LockTensor': grpc.unary_unary_rpc_method_handler(
+                    servicer.LockTensor,
+                    request_deserializer=gpu__service__pb2.LockTensorRequest.FromString,
+                    response_serializer=gpu__service__pb2.LockTensorResponse.SerializeToString,
+            ),
+            'UnlockTensor': grpc.unary_unary_rpc_method_handler(
+                    servicer.UnlockTensor,
+                    request_deserializer=gpu__service__pb2.UnlockTensorRequest.FromString,
+                    response_serializer=gpu__service__pb2.UnlockTensorResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -266,5 +298,39 @@ class GPUService(object):
         return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/ExistTensor',
             gpu__service__pb2.ExistTensorRequest.SerializeToString,
             gpu__service__pb2.ExistTensorResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def LockTensor(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/LockTensor',
+            gpu__service__pb2.LockTensorRequest.SerializeToString,
+            gpu__service__pb2.LockTensorResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def UnlockTensor(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/UnlockTensor',
+            gpu__service__pb2.UnlockTensorRequest.SerializeToString,
+            gpu__service__pb2.UnlockTensorResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

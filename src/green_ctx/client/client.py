@@ -96,6 +96,18 @@ class GPUClient:
         response = self.stub.ExistTensor(request)
         return response.exists
 
+    def lock_tensor(self, name: str) -> bool:
+        """Acquire exclusive access for a tensor."""
+        request = gpu_service_pb2.LockTensorRequest(name=name)
+        response = self.stub.LockTensor(request)
+        return response.success
+
+    def unlock_tensor(self, name: str) -> bool:
+        """Release exclusive access for a tensor."""
+        request = gpu_service_pb2.UnlockTensorRequest(name=name)
+        response = self.stub.UnlockTensor(request)
+        return response.success
+
     def close(self):
         """Close the connection to the server."""
         for name in list(self.anon_tensors):

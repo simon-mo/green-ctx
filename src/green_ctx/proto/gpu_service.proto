@@ -16,6 +16,8 @@ service GPUService {
   rpc FreeTensor(FreeTensorRequest) returns (FreeTensorResponse) {}
   rpc GetTensor(GetTensorRequest) returns (TensorInfo) {}
   rpc ExistTensor(ExistTensorRequest) returns (ExistTensorResponse) {}
+  rpc LockTensor(LockTensorRequest) returns (LockTensorResponse) {}
+  rpc UnlockTensor(UnlockTensorRequest) returns (UnlockTensorResponse) {}
 }
 
 // Health check messages
@@ -83,4 +85,20 @@ message ExistTensorRequest {
 
 message ExistTensorResponse {
   bool exists = 1;
+}
+
+message LockTensorRequest {
+  string name = 1;
+}
+
+message LockTensorResponse {
+  bool success = 1;
+}
+
+message UnlockTensorRequest {
+  string name = 1;
+}
+
+message UnlockTensorResponse {
+  bool success = 1;
 }
