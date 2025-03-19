@@ -60,6 +60,21 @@ class GPUServiceStub(object):
                 request_serializer=gpu__service__pb2.UnlockTensorRequest.SerializeToString,
                 response_deserializer=gpu__service__pb2.UnlockTensorResponse.FromString,
                 )
+        self.KVPoolInit = channel.unary_unary(
+                '/green_ctx.proto.GPUService/KVPoolInit',
+                request_serializer=gpu__service__pb2.KVPoolInitRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.KVPoolInitResponse.FromString,
+                )
+        self.KVPoolAlloc = channel.unary_unary(
+                '/green_ctx.proto.GPUService/KVPoolAlloc',
+                request_serializer=gpu__service__pb2.KVPoolAllocRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.KVPoolAllocResponse.FromString,
+                )
+        self.KVPoolFree = channel.unary_unary(
+                '/green_ctx.proto.GPUService/KVPoolFree',
+                request_serializer=gpu__service__pb2.KVPoolFreeRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.KVPoolFreeResponse.FromString,
+                )
 
 
 class GPUServiceServicer(object):
@@ -123,6 +138,24 @@ class GPUServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def KVPoolInit(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def KVPoolAlloc(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def KVPoolFree(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_GPUServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -170,6 +203,21 @@ def add_GPUServiceServicer_to_server(servicer, server):
                     servicer.UnlockTensor,
                     request_deserializer=gpu__service__pb2.UnlockTensorRequest.FromString,
                     response_serializer=gpu__service__pb2.UnlockTensorResponse.SerializeToString,
+            ),
+            'KVPoolInit': grpc.unary_unary_rpc_method_handler(
+                    servicer.KVPoolInit,
+                    request_deserializer=gpu__service__pb2.KVPoolInitRequest.FromString,
+                    response_serializer=gpu__service__pb2.KVPoolInitResponse.SerializeToString,
+            ),
+            'KVPoolAlloc': grpc.unary_unary_rpc_method_handler(
+                    servicer.KVPoolAlloc,
+                    request_deserializer=gpu__service__pb2.KVPoolAllocRequest.FromString,
+                    response_serializer=gpu__service__pb2.KVPoolAllocResponse.SerializeToString,
+            ),
+            'KVPoolFree': grpc.unary_unary_rpc_method_handler(
+                    servicer.KVPoolFree,
+                    request_deserializer=gpu__service__pb2.KVPoolFreeRequest.FromString,
+                    response_serializer=gpu__service__pb2.KVPoolFreeResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -332,5 +380,56 @@ class GPUService(object):
         return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/UnlockTensor',
             gpu__service__pb2.UnlockTensorRequest.SerializeToString,
             gpu__service__pb2.UnlockTensorResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def KVPoolInit(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/KVPoolInit',
+            gpu__service__pb2.KVPoolInitRequest.SerializeToString,
+            gpu__service__pb2.KVPoolInitResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def KVPoolAlloc(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/KVPoolAlloc',
+            gpu__service__pb2.KVPoolAllocRequest.SerializeToString,
+            gpu__service__pb2.KVPoolAllocResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def KVPoolFree(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/KVPoolFree',
+            gpu__service__pb2.KVPoolFreeRequest.SerializeToString,
+            gpu__service__pb2.KVPoolFreeResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

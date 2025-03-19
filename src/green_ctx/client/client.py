@@ -108,6 +108,24 @@ class GPUClient:
         response = self.stub.UnlockTensor(request)
         return response.success
 
+    def kv_pool_init(self, total_num_blocks: int) -> bool:
+        """Initialize KV block pool."""
+        request = gpu_service_pb2.KVPoolInitRequest(total_num_blocks=total_num_blocks)
+        response = self.stub.KVPoolInit(request)
+        return response.success
+
+    def kv_pool_alloc(self, num_blocks: int) -> List[int]:
+        """Allocate blocks from KV pool."""
+        request = gpu_service_pb2.KVPoolAllocRequest(num_blocks=num_blocks)
+        response = self.stub.KVPoolAlloc(request)
+        return response.blocks
+
+    def kv_pool_free(self, blocks: List[int]) -> bool:
+        """Return blocks back to KV pool."""
+        request = gpu_service_pb2.KVPoolFreeRequest(blocks=blocks)
+        response = self.stub.KVPoolFree(request)
+        return response.success
+
     def close(self):
         """Close the connection to the server."""
         for name in list(self.anon_tensors):

@@ -42,6 +42,8 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         self.tensors: Dict[str, TensorMetadata] = {}
         self.tensor_locks: Dict[str, Lock] = {}
         self.global_lock = Lock()
+        self.kv_pool = None
+        self.kv_pool_lock = Lock()
 
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
 
@@ -207,6 +209,42 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         
         self.tensor_locks[name].release()  # is this fine?
         return gpu_service_pb2.UnlockTensorResponse(success=True)
+
+    def KVPoolInit(self, request, context):
+        """Initialize KV block pool."""
+        with self.kv_pool_lock:
+            if self.kv_pool is not None:
+                # another client already initialized, nothing to do
+                return gpu_service_pb2.KVPoolInitResponse(success=True)
+            
+            self.kv_pool = set(range(request.total_num_blocks))
+            return gpu_service_pb2.KVPoolInitResponse(success=True)
+
+    def KVPoolAlloc(self, request, context):
+        """Allocate KV blocks from the pool for client.
+        Returns list of block ids, or an empty list if not enough blocks."""
+        num_blocks = request.num_blocks
+        if num_blocks <= 0:
+            context.abort(grpc.StatusCode.INVALID_ALLOC_REQUEST,
+                          f"Cannot allocate {num_blocks} blocks.")
+
+        with self.kv_pool_lock:
+            if num_blocks > len(self.kv_pool):
+                return gpu_service_pb2.KVPoolAllocResponse(blocks=[])
+
+            blocks = [self.kv_pool.pop() for _ in range(num_blocks)]
+            return gpu_service_pb2.KVPoolAllocResponse(blocks=blocks)
+
+    def KVPoolFree(self, request, context):
+        """Free the given block ids and add them back to the pool."""
+        with self.kv_pool_lock:
+            for block_id in request.blocks:
+                if block_id in self.kv_pool:
+                    context.abort(grpc.StatusCode.DOUBLE_FREE,
+                                  f"Block {block_id} is already freed.")
+                self.kv_pool.add(block_id)
+
+        return gpu_service_pb2.KVPoolFreeResponse(success=True)
 
 class GPUServer:
     def __init__(self, port: int = DEFAULT_PORT):

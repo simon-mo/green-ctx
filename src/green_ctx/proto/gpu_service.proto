@@ -18,6 +18,9 @@ service GPUService {
   rpc ExistTensor(ExistTensorRequest) returns (ExistTensorResponse) {}
   rpc LockTensor(LockTensorRequest) returns (LockTensorResponse) {}
   rpc UnlockTensor(UnlockTensorRequest) returns (UnlockTensorResponse) {}
+  rpc KVPoolInit(KVPoolInitRequest) returns (KVPoolInitResponse) {}
+  rpc KVPoolAlloc(KVPoolAllocRequest) returns (KVPoolAllocResponse) {}
+  rpc KVPoolFree(KVPoolFreeRequest) returns (KVPoolFreeResponse) {}
 }
 
 // Health check messages
@@ -100,5 +103,29 @@ message UnlockTensorRequest {
 }
 
 message UnlockTensorResponse {
+  bool success = 1;
+}
+
+message KVPoolInitRequest {
+  int32 total_num_blocks = 1;
+}
+
+message KVPoolInitResponse {
+  bool success = 1;
+}
+
+message KVPoolAllocRequest {
+  int32 num_blocks = 1;
+}
+
+message KVPoolAllocResponse {
+  repeated int32 blocks = 1;
+}
+
+message KVPoolFreeRequest {
+  repeated int32 blocks = 1;
+}
+
+message KVPoolFreeResponse {
   bool success = 1;
 }
