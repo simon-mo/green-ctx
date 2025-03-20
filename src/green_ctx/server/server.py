@@ -233,11 +233,13 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
                 return gpu_service_pb2.KVPoolAllocResponse(blocks=[])
 
             blocks = [self.kv_pool.pop() for _ in range(num_blocks)]
+            logger.info(f"KV pool allocated blocks: {blocks}")
             return gpu_service_pb2.KVPoolAllocResponse(blocks=blocks)
 
     def KVPoolFree(self, request, context):
         """Free the given block ids and add them back to the pool."""
         with self.kv_pool_lock:
+            logger.info(f"KV pool freeing blocks: {request.blocks}")
             for block_id in request.blocks:
                 if block_id in self.kv_pool:
                     context.abort(grpc.StatusCode.DOUBLE_FREE,

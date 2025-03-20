@@ -118,7 +118,7 @@ class GPUClient:
         """Allocate blocks from KV pool."""
         request = gpu_service_pb2.KVPoolAllocRequest(num_blocks=num_blocks)
         response = self.stub.KVPoolAlloc(request)
-        return response.blocks
+        return list(response.blocks)
 
     def kv_pool_free(self, blocks: List[int]) -> bool:
         """Return blocks back to KV pool."""
