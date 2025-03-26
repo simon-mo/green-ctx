@@ -40,15 +40,23 @@ def main(mp_barrier: mp.Barrier):
         )
         C = torch.empty([1024, 1024], dtype=torch.bfloat16)
 
+        # warmup the entire GPU
+        for _ in range(100):
+            torch.matmul(A, B, out=C)
+
+        mp_barrier.wait()
+
+        num_iters = 1000
+
         # Perform the matmul and time it using cuda event
         start = torch.cuda.Event(enable_timing=True)
         end = torch.cuda.Event(enable_timing=True)
         start.record()
-        for _ in range(100):
+        for _ in range(num_iters):
             torch.matmul(A, B, out=C)
         end.record()
         torch.cuda.synchronize()
-        print(f"Avg time for each matmul: {start.elapsed_time(end)/100} ms")
+        print(f"Avg time for each matmul: {start.elapsed_time(end)/num_iters} ms")
 
         # Clean up resources
         print("\nCleaning up resources...")
@@ -61,7 +69,10 @@ def main(mp_barrier: mp.Barrier):
         client.close()
 
 def run_multiple_workers():
-    num_workers = 8
+    # use spawn instead of fork to avoid sharing context
+    mp.set_start_method("spawn")
+
+    num_workers = 4
     barrier = mp.Barrier(num_workers)
 
     workers = []
