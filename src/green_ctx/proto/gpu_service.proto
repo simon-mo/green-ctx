@@ -108,6 +108,7 @@ message UnlockTensorResponse {
 
 message KVPoolInitRequest {
   int32 total_num_blocks = 1;
+  int32 kv_block_bytes = 2;
 }
 
 message KVPoolInitResponse {

@@ -15,7 +15,9 @@ from green_ctx import GreenContext, get_sms_by_spec, init
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class GPUClient:
+
     def __init__(self, host: str = "localhost", port: int = 50051):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = gpu_service_pb2_grpc.GPUServiceStub(self.channel)
@@ -39,37 +41,32 @@ class GPUClient:
 
     def request_exclusive_SMs(self, num_sms: int) -> tuple[str, GreenContext]:
         """Request exclusive access to a number of SMs."""
-        request = gpu_service_pb2.RequestSMsRequest(
-            num_sms=num_sms,
-            client_id=self.client_id
-        )
+        request = gpu_service_pb2.RequestSMsRequest(num_sms=num_sms,
+                                                    client_id=self.client_id)
         response = self.stub.RequestExclusiveSMs(request)
         return response.alloc_uuid, get_sms_by_spec(
             num_groups=response.num_groups,
             min_size=response.min_size,
             indices=response.indices,
-            get_remainder=response.get_remainder
-        )
+            get_remainder=response.get_remainder)
 
     def free_SMs(self, alloc_uuid: str) -> bool:
         """Free previously allocated SMs."""
-        request = gpu_service_pb2.FreeSMsRequest(
-            alloc_uuid=alloc_uuid,
-        )
+        request = gpu_service_pb2.FreeSMsRequest(alloc_uuid=alloc_uuid, )
         response = self.stub.FreeSMs(request)
         return response.success
 
-    def alloc_tensor(self, shape: List[int], dtype: str, name: Optional[str] = None, get_if_exists: bool = False) -> torch.Tensor:
+    def alloc_tensor(self,
+                     shape: List[int],
+                     dtype: str,
+                     name: Optional[str] = None,
+                     get_if_exists: bool = False) -> torch.Tensor:
         """Allocate a new tensor in GPU memory."""
         if name is None:
             name = f"tensor_{uuid.uuid4().hex[:8]}"
             self.anon_tensors.add(name)
         request = gpu_service_pb2.AllocTensorRequest(
-            shape=shape,
-            dtype=dtype,
-            name=name,
-            get_if_exists=get_if_exists
-        )
+            shape=shape, dtype=dtype, name=name, get_if_exists=get_if_exists)
         response = self.stub.AllocTensor(request)
         deserializer, payload = pickle.loads(response.serialized_info)
 
@@ -108,9 +105,10 @@ class GPUClient:
         response = self.stub.UnlockTensor(request)
         return response.success
 
-    def kv_pool_init(self, total_num_blocks: int) -> bool:
+    def kv_pool_init(self, total_num_blocks: int, kv_block_bytes: int) -> bool:
         """Initialize KV block pool."""
-        request = gpu_service_pb2.KVPoolInitRequest(total_num_blocks=total_num_blocks)
+        request = gpu_service_pb2.KVPoolInitRequest(
+            total_num_blocks=total_num_blocks, kv_block_bytes=kv_block_bytes)
         response = self.stub.KVPoolInit(request)
         return response.success
 
