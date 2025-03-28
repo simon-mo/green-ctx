@@ -18,14 +18,18 @@ logger = logging.getLogger(__name__)
 
 class GPUClient:
 
-    def __init__(self, host: str = "localhost", port: int = 50051):
+    def __init__(self,
+                 model_name: str,
+                 host: str = "localhost",
+                 port: int = 50051):
         self.channel = grpc.insecure_channel(f"{host}:{port}")
         self.stub = gpu_service_pb2_grpc.GPUServiceStub(self.channel)
         self.client_id = str(uuid.uuid4())
+        self.model_name = model_name
         logger.info(f"Connected to GPU server at {host}:{port}")
 
         init()
-        logger.info("Initialized GreenContext")
+        logger.info(f"Initialized GPUClient for '{model_name}'")
 
         self.anon_tensors = set()
 
@@ -108,19 +112,23 @@ class GPUClient:
     def kv_pool_init(self, total_num_blocks: int, kv_block_bytes: int) -> bool:
         """Initialize KV block pool."""
         request = gpu_service_pb2.KVPoolInitRequest(
-            total_num_blocks=total_num_blocks, kv_block_bytes=kv_block_bytes)
+            model_name=self.model_name,
+            total_num_blocks=total_num_blocks,
+            kv_block_bytes=kv_block_bytes)
         response = self.stub.KVPoolInit(request)
         return response.success
 
     def kv_pool_alloc(self, num_blocks: int) -> List[int]:
         """Allocate blocks from KV pool."""
-        request = gpu_service_pb2.KVPoolAllocRequest(num_blocks=num_blocks)
+        request = gpu_service_pb2.KVPoolAllocRequest(
+            model_name=self.model_name, num_blocks=num_blocks)
         response = self.stub.KVPoolAlloc(request)
         return list(response.blocks)
 
     def kv_pool_free(self, blocks: List[int]) -> bool:
         """Return blocks back to KV pool."""
-        request = gpu_service_pb2.KVPoolFreeRequest(blocks=blocks)
+        request = gpu_service_pb2.KVPoolFreeRequest(model_name=self.model_name,
+                                                    blocks=blocks)
         response = self.stub.KVPoolFree(request)
         return response.success
 

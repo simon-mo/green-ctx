@@ -13,7 +13,7 @@ from green_ctx.client.client import GPUClient
 
 def main():
     # Create a client connection to the gRPC server
-    client = GPUClient(host="localhost", port=50051)
+    client = GPUClient(model_name="example", host="localhost", port=50051)
 
     try:
         # Check server health
