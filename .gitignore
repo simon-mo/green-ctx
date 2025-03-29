@@ -177,3 +177,5 @@ pyrightconfig.json
 
 *.csv
 *.nsys-rep
+
+*.out
