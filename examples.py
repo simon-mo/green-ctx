@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from green_ctx import make_shard, init, partition, get_sms_in_range
-from green_ctx.kernels import count_sm_ids, launch_smid, run_crash_kernel
+from green_ctx.kernels import count_sm_ids, launch_smid, run_crash_kernel, run_global_timer
 from green_ctx.timing import cuda_timing_decorator
 from green_ctx.utils import print_current_context_id
 
@@ -14,7 +14,9 @@ from green_ctx.utils import CHECK_CUDA
 
 
 def example_shard():
-    print("---\nExample showcasing limiting the number of SMs used by a context.")
+    print(
+        "---\nExample showcasing limiting the number of SMs used by a context."
+    )
     green_ctx = make_shard(8)
     print(f"Using {green_ctx.sm_count} SMs.")
 
@@ -55,7 +57,9 @@ def benchmark_matmul():
 
 
 def multistream_dispatch():
-    print("---\nExample showcasing multi-stream dispatch under the same context.")
+    print(
+        "---\nExample showcasing multi-stream dispatch under the same context."
+    )
     green_ctx = make_shard(8)
     stream_1 = green_ctx.make_stream()
     stream_2 = green_ctx.make_stream()
@@ -78,8 +82,12 @@ def multistream_dispatch():
 def partition_two():
     print("---\nExample showcasing partitioning a device into two shards")
     green_ctx_1, green_ctx_2 = partition(32, 8)
-    print(f"Created {green_ctx_1.sm_count} SMs for shard 1: {green_ctx_1.sm_ids}")
-    print(f"Created {green_ctx_2.sm_count} SMs for shard 2. {green_ctx_2.sm_ids}")
+    print(
+        f"Created {green_ctx_1.sm_count} SMs for shard 1: {green_ctx_1.sm_ids}"
+    )
+    print(
+        f"Created {green_ctx_2.sm_count} SMs for shard 2. {green_ctx_2.sm_ids}"
+    )
 
     with green_ctx_1.with_context():
         print("SM utilizations for shard 1 ({SM ID: usage count})")
@@ -112,8 +120,12 @@ def partition_two():
 def partition_with_torch():
     print("---\nExample showcasing two torch streams")
     green_ctx_1, green_ctx_2 = partition(32, 8)
-    print(f"Created {green_ctx_1.sm_count} SMs for shard 1: {green_ctx_1.sm_ids}")
-    print(f"Created {green_ctx_2.sm_count} SMs for shard 2. {green_ctx_2.sm_ids}")
+    print(
+        f"Created {green_ctx_1.sm_count} SMs for shard 1: {green_ctx_1.sm_ids}"
+    )
+    print(
+        f"Created {green_ctx_2.sm_count} SMs for shard 2. {green_ctx_2.sm_ids}"
+    )
 
     stream_1 = green_ctx_1.make_stream()
     stream_2 = green_ctx_2.make_stream()
@@ -126,18 +138,16 @@ def partition_with_torch():
 
     with green_ctx_1.with_context():
         with torch.cuda.stream(torch_stream_1):
-            e_start_1, e_end_1 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
-                enable_timing=True
-            )
+            e_start_1, e_end_1 = torch.cuda.Event(
+                enable_timing=True), torch.cuda.Event(enable_timing=True)
             e_start_1.record()
             c_1 = torch.matmul(a, b)
             e_end_1.record()
 
     with green_ctx_2.with_context():
         with torch.cuda.stream(torch_stream_2):
-            e_start_2, e_end_2 = torch.cuda.Event(enable_timing=True), torch.cuda.Event(
-                enable_timing=True
-            )
+            e_start_2, e_end_2 = torch.cuda.Event(
+                enable_timing=True), torch.cuda.Event(enable_timing=True)
             e_start_2.record()
             c_2 = torch.matmul(a, b)
             e_end_2.record()
@@ -165,6 +175,7 @@ def benchmark_set_context():
     print(f"Average time to push context: {np.mean(push_times) * 1e-3:.2f} us")
     print(f"Average time to pop context: {np.mean(pop_times) * 1e-3:.2f} us")
 
+
 def check_get_sms_in_range():
     print(("---\nGetting SMs in a range"))
 
@@ -181,6 +192,7 @@ def check_get_sms_in_range():
     else:
         print("No overlaps in sm_ids between the two contexts.")
 
+
 def no_fault_isolation():
     print("---\nExample showcasing no fault isolation")
     green_ctx_1, green_ctx_2 = partition(8, 8)
@@ -191,24 +203,33 @@ def no_fault_isolation():
             torch.cuda.synchronize()
         except RuntimeError as e:
             # check that error is CUDA error: an illegal memory access was encountered
-            assert "CUDA error: an illegal memory access was encountered" in str(e)
+            assert "CUDA error: an illegal memory access was encountered" in str(
+                e)
             print("Crash kernel triggered an exception", e)
 
     with green_ctx_2.with_context():
-        _ = torch.randn(1024, 1024).cuda() # this still fail
+        _ = torch.randn(1024, 1024).cuda()  # this still fail
         torch.cuda.synchronize()
 
 
+def utility_timer():
+    print("---\nExample showcasing utility timer")
+    timing_buffer_tensor = torch.zeros(2, dtype=torch.uint64).cuda()
+    run_global_timer(timing_buffer_tensor, 0)
+    run_global_timer(timing_buffer_tensor, 1)
+    print("Timing buffer", timing_buffer_tensor)
 
 
 def main():
-    example_shard()
-    benchmark_matmul()
-    multistream_dispatch()
-    partition_two()
-    partition_with_torch()
-    benchmark_set_context()
-    check_get_sms_in_range()
+    # example_shard()
+    # benchmark_matmul()
+    # multistream_dispatch()
+    # partition_two()
+    # partition_with_torch()
+    # benchmark_set_context()
+    # check_get_sms_in_range()
+
+    utility_timer()
 
     # no_fault_isolation()
 

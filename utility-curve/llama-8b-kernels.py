@@ -3,6 +3,7 @@ import torch.nn as nn
 from vllm.model_executor.layers.layernorm import RMSNorm
 from flash_attn import flash_attn_func, flash_attn_with_kvcache
 from green_ctx import make_shard
+from green_ctx.kernels import run_global_timer
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.bfloat16)
@@ -62,7 +63,14 @@ def time_kernel(kernel, *args):
     return start.elapsed_time(end) / num_trials
 
 
-def concurrent_launch(kernel, *args, num_sms_per_stream, num_streams):
+num_trials = 50
+
+
+def concurrent_launch(kernel,
+                      *args,
+                      num_sms_per_stream,
+                      num_streams,
+                      timing_buffer_tensor=None):
     # create mutually exclusive green contexts
     ctxs = [make_shard(num_sms_per_stream, i) for i in range(num_streams)]
     go_event = torch.cuda.Event(enable_timing=False)
@@ -70,16 +78,26 @@ def concurrent_launch(kernel, *args, num_sms_per_stream, num_streams):
                       torch.cuda.Event(enable_timing=True))
                      for _ in range(num_streams)]
 
-    num_trials = 50
+    kernel_issued_events = [
+        torch.cuda.Event(enable_timing=False) for _ in range(num_streams)
+    ]
+
+    if timing_buffer_tensor is not None:
+        assert timing_buffer_tensor.numel() == num_streams * num_trials
 
     for i, ctx in enumerate(ctxs):
         with ctx.with_context(), ctx.with_torch_stream() as stream:
+            kernel_issued_events[i].record()
             stream.wait_event(go_event)
-
             stream_events[i][0].record()
-            for _ in range(num_trials):
+            for j in range(num_trials):
                 kernel(*args)
+                if timing_buffer_tensor is not None:
+                    run_global_timer(timing_buffer_tensor, i * num_trials + j)
             stream_events[i][1].record()
+
+    for i in range(num_streams):
+        kernel_issued_events[i].synchronize()
 
     go_event.record()
 
@@ -94,8 +112,69 @@ def concurrent_launch(kernel, *args, num_sms_per_stream, num_streams):
 def warmup_device():
     a = torch.randn(128, 81920)
     b = torch.randn(81920, 128)
-    for _ in range(100):
+    x_BSH = torch.randn(B, S, hidden_size)
+    for _ in range(500):
         a @ b
+        rms_norm(x_BSH)
+
+    torch.cuda.synchronize()
+
+
+def plot_timing(relative_timing):
+    # Convert timing data to milliseconds for better readability
+    timing_ms = relatived_timing.float(
+    ) / 1e6  # Convert from nanoseconds to milliseconds
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Set up a high-quality figure with a modern style
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(12, 8), dpi=300)
+
+    # Create scatter plot
+    for i in range(timing_out.shape[0]):
+        plt.scatter(
+            timing_ms[i].cpu().numpy(),
+            np.ones_like(timing_ms[i].cpu().numpy()) * i,
+            alpha=0.7,
+            s=50,  # Marker size
+            label=f"Stream {i}" if i < 5 else None,  # Limit legend entries
+            edgecolors='k',
+            linewidths=0.5)
+
+    # Add a colorful vertical line for the average time per stream
+    stream_means = timing_ms.mean(dim=1).cpu().numpy()
+    for i, mean_val in enumerate(stream_means):
+        plt.axvline(x=mean_val,
+                    color=plt.cm.tab10(i % 10),
+                    linestyle='--',
+                    alpha=0.5)
+
+    # Customize the plot
+    plt.title('Kernel Execution Timing per Stream and Trial', fontsize=16)
+    plt.xlabel('Time (milliseconds)', fontsize=14)
+    plt.ylabel('Stream ID', fontsize=14)
+    plt.yticks(range(timing_out.shape[0]))
+    plt.grid(True, linestyle='--', alpha=0.7)
+
+    # Add legend for the first few streams to avoid overcrowding
+    plt.legend(loc='upper right', framealpha=0.9)
+
+    # Add statistics annotation
+    textstr = f"Total streams: {timing_out.shape[0]}\nTrials per stream: {num_trials}"
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    plt.annotate(textstr,
+                 xy=(0.02, 0.98),
+                 xycoords='axes fraction',
+                 fontsize=10,
+                 va='top',
+                 ha='left',
+                 bbox=props)
+
+    plt.tight_layout()
+    plt.savefig('kernel_timing_scatter.png', dpi=300)
+    plt.show()
 
 
 if __name__ == "__main__":
@@ -110,16 +189,16 @@ if __name__ == "__main__":
     q_B1H = qkv_BSH_HKV[:, 0, :hidden_size]
     kv_cache_BS_KV = torch.randn(B, S, num_key_value_heads, head_dim * 2)
 
-    warmup_device()
+    # warmup_device()
 
     kernels = {
-        "rms_norm": rms_norm,
+        # "rms_norm": rms_norm,
         "qkv_proj": qkv_proj,
-        "o_proj": o_proj,
-        "up_proj": up_proj,
-        "down_proj": down_proj,
-        "prefill_attn": prefill_attn,
-        "decode_attn": decode_attn,
+        # "o_proj": o_proj,
+        # "up_proj": up_proj,
+        # "down_proj": down_proj,
+        # "prefill_attn": prefill_attn,
+        # "decode_attn": decode_attn,
     }
 
     # print("standalone kernel time")
@@ -139,12 +218,14 @@ if __name__ == "__main__":
     #             print(f"{kernel_name} kernel: {time} ms, {n} SMs")
 
     print("concurrent kernel time")
+    timing_buffer_tensor = torch.zeros(num_trials * 16, dtype=torch.uint64)
     scenarios = [
-        (8, [1, 2, 4, 8, 16]),
-        (16, [1, 2, 4, 8]),
-        (32, [1, 2, 4]),
-        (64, [1, 2]),
-        (128, [1]),
+        (8, [16]),
+        # (8, [1, 2, 4, 8, 16]),
+        # (16, [1, 2, 4, 8]),
+        # (32, [1, 2, 4]),
+        # (64, [1, 2]),
+        # (128, [1]),
     ]
     for num_sms, num_streams in scenarios:
         for num_stream in num_streams:
@@ -166,10 +247,16 @@ if __name__ == "__main__":
                                              num_sms_per_stream=num_sms,
                                              num_streams=num_stream)
                 else:
-                    time = concurrent_launch(kernel,
-                                             x_BSH,
-                                             num_sms_per_stream=num_sms,
-                                             num_streams=num_stream)
+                    time = concurrent_launch(
+                        kernel,
+                        x_BSH,
+                        num_sms_per_stream=num_sms,
+                        num_streams=num_stream,
+                        timing_buffer_tensor=timing_buffer_tensor)
                 print(
                     f"{kernel_name} kernel: {time} ms, {num_sms} SMs, {num_stream} streams"
                 )
+
+    timing_out = timing_buffer_tensor.reshape(16, num_trials).to(torch.float64)
+    relatived_timing = timing_out - timing_out[0, 0]
+    plot_timing(relatived_timing)
