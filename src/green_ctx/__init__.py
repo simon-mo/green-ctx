@@ -9,7 +9,7 @@ import math
 from functools import cached_property
 import os
 
-from .utils import CHECK_CUDA
+from .utils import CHECK_CUDA, set_cublas_sm_count
 
 device = None
 
@@ -39,7 +39,8 @@ class GreenContext:
     @contextmanager
     def with_context(self):
         cuda.cuCtxPushCurrent(self.primary_context)
-        yield
+        with set_cublas_sm_count(self.sm_count):
+            yield
         cuda.cuCtxPopCurrent()
 
     def enter(self):
@@ -51,9 +52,8 @@ class GreenContext:
     def make_stream(self):
         stream = CHECK_CUDA(
             cuda.cuGreenCtxStreamCreate(
-                self.primary_context, cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0
-            )
-        )
+                self.primary_context,
+                cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
         return stream
 
     @cached_property
@@ -68,26 +68,25 @@ class GreenContext:
         return sorted(h_sm_ids.tolist())[1:]  # remove the -1
 
 
-def get_sms_in_range(start: int, end: int, get_remainder: bool=False) -> GreenContext:
+def get_sms_in_range(start: int,
+                     end: int,
+                     get_remainder: bool = False) -> GreenContext:
     """gets SMs in range from start to end (non-inclusive)
     NOTE: very sus behavior, idk why it only has 15 x 8 = 120 SMs avail in result_resources
     """
 
     sm_resource = CHECK_CUDA(
         cuda.cuDeviceGetDevResource(
-            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
-
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
 
     result_resources, _, remainder = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
             16,
             sm_resource,
-            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            cuda.CUdevSmResourceSplit_flags.
+            CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             8,
-        )
-    )
+        ))
 
     current_sm_id = 0
     group_indices_in_range = set()
@@ -102,69 +101,73 @@ def get_sms_in_range(start: int, end: int, get_remainder: bool=False) -> GreenCo
 
         current_sm_id += group_sm_count
 
-    selected_resources = [result_resources[idx] for idx in sorted(group_indices_in_range)]
+    selected_resources = [
+        result_resources[idx] for idx in sorted(group_indices_in_range)
+    ]
 
     if get_remainder:
         selected_resources.append(remainder)
 
-    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(selected_resources, len(selected_resources)))
+    desc = CHECK_CUDA(
+        cuda.cuDevResourceGenerateDesc(selected_resources,
+                                       len(selected_resources)))
     green_ctx = CHECK_CUDA(
         cuda.cuGreenCtxCreate(
-            desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
-        )
-    )
+            desc, device,
+            cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM))
     green_sm_resource = CHECK_CUDA(
         cuda.cuGreenCtxGetDevResource(
-            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
 
-    gc = GreenContext(
-        sm_count=green_sm_resource.sm.smCount, raw_context=green_ctx, primary_context=CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
-    )
+    gc = GreenContext(sm_count=green_sm_resource.sm.smCount,
+                      raw_context=green_ctx,
+                      primary_context=CHECK_CUDA(
+                          cuda.cuCtxFromGreenCtx(green_ctx)))
 
     return gc
 
 
-def get_sms_by_spec(num_groups: int, min_size: int, indices: List[int], get_remainder: bool=False) -> GreenContext:
+def get_sms_by_spec(num_groups: int,
+                    min_size: int,
+                    indices: List[int],
+                    get_remainder: bool = False) -> GreenContext:
     """gets SMs in range by the green context spec"""
     sm_resource = CHECK_CUDA(
         cuda.cuDeviceGetDevResource(
-            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
 
     result_resources, _, remainder = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
             num_groups,
             sm_resource,
-            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            cuda.CUdevSmResourceSplit_flags.
+            CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             min_size,
-        )
-    )
+        ))
 
     selected_resources = [result_resources[idx] for idx in indices]
     print(f"Selected resources at indices: {indices}")
     if get_remainder:
         selected_resources.append(remainder)
 
-    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(selected_resources, len(selected_resources)))
+    desc = CHECK_CUDA(
+        cuda.cuDevResourceGenerateDesc(selected_resources,
+                                       len(selected_resources)))
     green_ctx = CHECK_CUDA(
         cuda.cuGreenCtxCreate(
-            desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
-        )
-    )
+            desc, device,
+            cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM))
     green_sm_resource = CHECK_CUDA(
         cuda.cuGreenCtxGetDevResource(
-            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
 
-    gc = GreenContext(
-        sm_count=green_sm_resource.sm.smCount, raw_context=green_ctx, primary_context=CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
-    )
+    gc = GreenContext(sm_count=green_sm_resource.sm.smCount,
+                      raw_context=green_ctx,
+                      primary_context=CHECK_CUDA(
+                          cuda.cuCtxFromGreenCtx(green_ctx)))
 
     return gc
+
 
 def make_shard(sm_request: int) -> GreenContext:
     assert (
@@ -174,9 +177,7 @@ def make_shard(sm_request: int) -> GreenContext:
     # Get SM resource
     sm_resource = CHECK_CUDA(
         cuda.cuDeviceGetDevResource(
-            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
     # print(f"SM Resource: {sm_resource.sm.smCount}")
 
     # Split the SM resource
@@ -184,10 +185,10 @@ def make_shard(sm_request: int) -> GreenContext:
         cuda.cuDevSmResourceSplitByCount(
             1,
             sm_resource,
-            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            cuda.CUdevSmResourceSplit_flags.
+            CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             sm_request,
-        )
-    )
+        ))
     # print(f"Number of groups created: {nb_groups}")
 
     # for i in range(nb_groups):
@@ -198,56 +199,49 @@ def make_shard(sm_request: int) -> GreenContext:
     desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc([result_resources[0]], 1))
     green_ctx = CHECK_CUDA(
         cuda.cuGreenCtxCreate(
-            desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
-        )
-    )
+            desc, device,
+            cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM))
     green_sm_resource = CHECK_CUDA(
         cuda.cuGreenCtxGetDevResource(
-            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
     # print(f"Green SM Resource: {green_sm_resource.sm.smCount}")
     sm_count = green_sm_resource.sm.smCount
 
     primary_context = CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
-    return GreenContext(
-        sm_count=sm_count, raw_context=green_ctx, primary_context=primary_context
-    )
+    return GreenContext(sm_count=sm_count,
+                        raw_context=green_ctx,
+                        primary_context=primary_context)
 
 
-def partition(sm_size_a: int, sm_size_b: int) -> Tuple[GreenContext, GreenContext]:
+def partition(sm_size_a: int,
+              sm_size_b: int) -> Tuple[GreenContext, GreenContext]:
     assert sm_size_a % 8 == sm_size_b % 8 == 0, "must be a multiple of 8"
 
     sm_resource = CHECK_CUDA(
         cuda.cuDeviceGetDevResource(
-            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-        )
-    )
+            device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
     # split into groups of 8, so we want total of 16 groups where 8x16=128
     result_resources, nb_groups, remaining = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
             16,
             sm_resource,
-            cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            cuda.CUdevSmResourceSplit_flags.
+            CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
             8,
-        )
-    )
+        ))
 
-    group_1 = result_resources[0 : sm_size_a // 8]
-    group_2 = result_resources[len(group_1) : len(group_1) + sm_size_b // 8]
+    group_1 = result_resources[0:sm_size_a // 8]
+    group_2 = result_resources[len(group_1):len(group_1) + sm_size_b // 8]
     results = []
     for group in [group_1, group_2]:
         desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(group, len(group)))
         green_ctx = CHECK_CUDA(
             cuda.cuGreenCtxCreate(
-                desc, device, cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM
-            )
-        )
+                desc, device,
+                cuda.CUgreenCtxCreate_flags.CU_GREEN_CTX_DEFAULT_STREAM))
         green_sm_resource = CHECK_CUDA(
             cuda.cuGreenCtxGetDevResource(
-                green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM
-            )
-        )
+                green_ctx, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
         sm_count = green_sm_resource.sm.smCount
         primary_context = CHECK_CUDA(cuda.cuCtxFromGreenCtx(green_ctx))
         results.append(
@@ -255,6 +249,5 @@ def partition(sm_size_a: int, sm_size_b: int) -> Tuple[GreenContext, GreenContex
                 sm_count=sm_count,
                 raw_context=green_ctx,
                 primary_context=primary_context,
-            )
-        )
+            ))
     return tuple(results)
