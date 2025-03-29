@@ -63,7 +63,7 @@ def time_kernel(kernel, *args):
     return start.elapsed_time(end) / num_trials
 
 
-num_trials = 50
+num_trials = 20
 
 
 def concurrent_launch(kernel,
@@ -91,7 +91,8 @@ def concurrent_launch(kernel,
             stream.wait_event(go_event)
             stream_events[i][0].record()
             for j in range(num_trials):
-                kernel(*args)
+                for _ in range(20):
+                    kernel(*args)
                 if timing_buffer_tensor is not None:
                     run_global_timer(timing_buffer_tensor, i * num_trials + j)
             stream_events[i][1].record()
