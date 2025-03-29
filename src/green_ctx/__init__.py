@@ -56,6 +56,12 @@ class GreenContext:
                 cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
         return stream
 
+    @contextmanager
+    def with_torch_stream(self):
+        stream = torch.cuda.ExternalStream(int(self.make_stream()))
+        with torch.cuda.stream(stream):
+            yield stream
+
     @cached_property
     def sm_ids(self):
         from .kernels import launch_smid
@@ -169,7 +175,7 @@ def get_sms_by_spec(num_groups: int,
     return gc
 
 
-def make_shard(sm_request: int) -> GreenContext:
+def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
     assert (
         sm_request >= 8 and sm_request % 8 == 0
     ), "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
@@ -180,23 +186,29 @@ def make_shard(sm_request: int) -> GreenContext:
             device, cuda.CUdevResourceType.CU_DEV_RESOURCE_TYPE_SM))
     # print(f"SM Resource: {sm_resource.sm.smCount}")
 
+    if sm_request == 8:  # for best split, ignore cluster size
+        sm_resource_split_flags = cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
+    else:
+        sm_resource_split_flags = cuda.CUdevSmResourceSplit_flags.CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE
+
     # Split the SM resource
     result_resources, nb_groups, remaining = CHECK_CUDA(
         cuda.cuDevSmResourceSplitByCount(
-            1,
+            # 1,
+            128 // 8,
             sm_resource,
-            cuda.CUdevSmResourceSplit_flags.
-            CU_DEV_SM_RESOURCE_SPLIT_MAX_POTENTIAL_CLUSTER_SIZE,
+            sm_resource_split_flags,
             sm_request,
         ))
-    # print(f"Number of groups created: {nb_groups}")
 
+    # print(f"Number of groups created: {nb_groups}")
     # for i in range(nb_groups):
     #     print(f"Group {i}: {result_resources[i].sm.smCount} SMs")
-
     # print(f"Remaining SMs: {remaining.sm.smCount}")
+    # print(f"Resource idx: {resource_idx}")
 
-    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc([result_resources[0]], 1))
+    desc = CHECK_CUDA(
+        cuda.cuDevResourceGenerateDesc([result_resources[resource_idx]], 1))
     green_ctx = CHECK_CUDA(
         cuda.cuGreenCtxCreate(
             desc, device,
