@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
-from typing import Dict, List
+from typing import Dict, List, Optional
 import logging
 
 
@@ -215,7 +215,7 @@ class KVCachePool:
                 f"PAGE_BYTES={PAGE_BYTES} is not aligned with "
                 f"kv_block_bytes={kv_block_bytes}")
 
-    def alloc(self, need_size: int) -> List[int]:
+    def alloc(self, need_size: int) -> Optional[List[int]]:
         if self.available_size() < need_size:
             return None
 
