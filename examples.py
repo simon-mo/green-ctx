@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from green_ctx import make_shard, init, partition, get_sms_in_range
-from green_ctx.kernels import count_sm_ids, launch_smid, run_crash_kernel, run_global_timer
+from green_ctx.kernels import count_sm_ids, launch_smid, run_crash_kernel, run_global_timer, run_sleep_kernel
 from green_ctx.timing import cuda_timing_decorator
 from green_ctx.utils import print_current_context_id
 
@@ -216,6 +216,7 @@ def utility_timer():
     print("---\nExample showcasing utility timer")
     timing_buffer_tensor = torch.zeros(2, dtype=torch.uint64).cuda()
     run_global_timer(timing_buffer_tensor, 0)
+    run_sleep_kernel(1000)
     run_global_timer(timing_buffer_tensor, 1)
     print("Timing buffer", timing_buffer_tensor)
 

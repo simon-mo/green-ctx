@@ -2,6 +2,8 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 #include <stdio.h>
+#include <stdlib.h>
+
 #define CHECK_CUDA(call) \
     do { \
         CUresult result = call; \
@@ -16,10 +18,9 @@
 
 // Constants
 const unsigned int strideLen = 16; // Cache line size: 128 Bytes, 16 words
-const unsigned int numBlocks = 132*9; // Number of SMs on H100
+const unsigned int numBlocks = 132*8; // Number of SMs on H100
 const unsigned int numThreadsPerBlock = 1024;
 const unsigned long long loopCount = 500;
-const unsigned int numGreenSMs = 24;
 
 // CUDA kernel to test memory bandwidth
 __global__ void bandwidthTestKernel(unsigned long long *data) {
@@ -78,9 +79,16 @@ void setGreenSMs(unsigned int numSMs) {
     CHECK_CUDA(cuCtxSetCurrent(green_ctx_ctx));
 }
 
-int main() {
+int main(int argc, char **argv) {
     // Number of trials for averaging bandwidth measurements
     const int numTrials = 10;
+
+    if (argc != 2) {
+        printf("Usage: %s <numGreenSMs>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    unsigned int numGreenSMs = atoi(argv[1]);
 
     // Define the size of the data array
     // Total number of threads

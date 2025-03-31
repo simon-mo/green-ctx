@@ -4,6 +4,7 @@ import numpy as np
 import ctypes
 import torch
 from collections import Counter
+from functools import lru_cache
 
 # Define CUDA kernel
 simd_code = """
@@ -23,6 +24,7 @@ extern "C" __global__ void my_func(int *d_sm_ids, int size) {
 
 
 # Compile the CUDA kernel
+@lru_cache(maxsize=None)
 def compile_kernel(kernel_code: str, function_name: str = "my_func"):
     prog = CHECK_CUDA(
         nvrtc.nvrtcCreateProgram(str.encode(kernel_code), b"smid.cu", 0, [],
@@ -137,6 +139,8 @@ extern "C" __global__ void global_timer(uint64_t *d_timer, uint64_t offset) {
 
 
 def run_global_timer(timing_buffer_tensor, offset=0, stream=None):
+    if timing_buffer_tensor is None:
+        return
     kernel = compile_kernel(timer_code, "global_timer")
 
     # Convert arguments to numpy arrays first
@@ -150,4 +154,21 @@ def run_global_timer(timing_buffer_tensor, offset=0, stream=None):
     CHECK_CUDA(
         cuda.cuLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream,
                             args.ctypes.data, 0))
-    torch.cuda.synchronize()
+
+
+sleep_code = """
+extern "C" __global__ void cuda_nanosleep(unsigned int sleep_time_ns) {
+    asm volatile("nanosleep.u32 %0;" : : "r"(sleep_time_ns));
+}
+"""
+
+
+def run_sleep_kernel(time_us: int, stream=None):
+    assert time_us <= 1000, "max 1ms"
+    time_ns = time_us * 1000
+
+    kernel = compile_kernel(sleep_code, "cuda_nanosleep")
+    time_ns_arg = np.array([time_ns], dtype=np.uint32)
+    CHECK_CUDA(
+        cuda.cuLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream,
+                            time_ns_arg.ctypes.data, 0))

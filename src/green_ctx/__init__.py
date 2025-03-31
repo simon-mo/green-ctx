@@ -36,6 +36,9 @@ class GreenContext:
     raw_context: Any = None
     primary_context: Any = None
 
+    raw_stream: Any = None
+    raw_stream_id: int = 0
+
     @contextmanager
     def with_context(self):
         cuda.cuCtxPushCurrent(self.primary_context)
@@ -50,11 +53,13 @@ class GreenContext:
         cuda.cuCtxPopCurrent()
 
     def make_stream(self):
-        stream = CHECK_CUDA(
-            cuda.cuGreenCtxStreamCreate(
-                self.primary_context,
-                cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
-        return stream
+        if self.raw_stream is None:
+            self.raw_stream = CHECK_CUDA(
+                cuda.cuGreenCtxStreamCreate(
+                    self.primary_context,
+                    cuda.CUstream_flags.CU_STREAM_NON_BLOCKING, 0))
+            self.raw_stream_id = int(self.raw_stream)
+        return self.raw_stream
 
     @contextmanager
     def with_torch_stream(self):
