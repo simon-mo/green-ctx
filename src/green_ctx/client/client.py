@@ -15,6 +15,8 @@ from green_ctx import GreenContext, get_sms_by_spec, init
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+KV_TENSOR_NAME = "kvcache-pool"
+
 
 class GPUClient:
 
@@ -64,11 +66,14 @@ class GPUClient:
                      shape: List[int],
                      dtype: str,
                      name: Optional[str] = None,
-                     get_if_exists: bool = False) -> torch.Tensor:
+                     get_if_exists: bool = False,
+                     model_specific: bool = True) -> torch.Tensor:
         """Allocate a new tensor in GPU memory."""
         if name is None:
-            name = f"tensor_{uuid.uuid4().hex[:8]}"
+            name += f"tensor_{uuid.uuid4().hex[:8]}"
             self.anon_tensors.add(name)
+        if model_specific:
+            name = self.model_name + '.' + name
         request = gpu_service_pb2.AllocTensorRequest(
             shape=shape, dtype=dtype, name=name, get_if_exists=get_if_exists)
         response = self.stub.AllocTensor(request)
@@ -76,38 +81,69 @@ class GPUClient:
 
         return deserializer(*payload)
 
-    def free_tensor(self, name: str) -> bool:
+    def free_tensor(self, name: str, model_specific: bool = True) -> bool:
         """Free a tensor from GPU memory."""
-        request = gpu_service_pb2.FreeTensorRequest(name=name)
-        response = self.stub.FreeTensor(request)
         if name in self.anon_tensors:
             self.anon_tensors.remove(name)
+        if model_specific:
+            name = self.model_name + '.' + name
+        request = gpu_service_pb2.FreeTensorRequest(name=name)
+        response = self.stub.FreeTensor(request)
         return response.success
 
-    def get_tensor(self, name: str) -> torch.Tensor:
+    def get_tensor(self,
+                   name: str,
+                   model_specific: bool = True) -> torch.Tensor:
         """Get tensor information by name."""
+        if model_specific:
+            name = self.model_name + '.' + name
         request = gpu_service_pb2.GetTensorRequest(name=name)
         response = self.stub.GetTensor(request)
         deserializer, payload = pickle.loads(response.serialized_info)
         return deserializer(*payload)
 
-    def exists_tensor(self, name: str) -> bool:
+    def exists_tensor(self, name: str, model_specific: bool = True) -> bool:
         """Check if a tensor exists."""
+        if model_specific:
+            name = self.model_name + '.' + name
         request = gpu_service_pb2.ExistTensorRequest(name=name)
         response = self.stub.ExistTensor(request)
         return response.exists
 
-    def lock_tensor(self, name: str) -> bool:
+    def lock_tensor(self, name: str, model_specific: bool = True) -> bool:
         """Acquire exclusive access for a tensor."""
+        if model_specific:
+            name = self.model_name + '.' + name
         request = gpu_service_pb2.LockTensorRequest(name=name)
         response = self.stub.LockTensor(request)
         return response.success
 
-    def unlock_tensor(self, name: str) -> bool:
+    def unlock_tensor(self, name: str, model_specific: bool = True) -> bool:
         """Release exclusive access for a tensor."""
+        if model_specific:
+            name = self.model_name + '.' + name
         request = gpu_service_pb2.UnlockTensorRequest(name=name)
         response = self.stub.UnlockTensor(request)
         return response.success
+
+    def get_kv_tensor(self, shape: List[int], dtype: str) -> torch.Tensor:
+        """Allocate a new tensor in GPU memory."""
+        name = KV_TENSOR_NAME
+        get_if_exists = True
+        model_specific = False  # KV tensor is not model-specific
+        self.lock_tensor(name, model_specific)
+        if self.exists_tensor(name, model_specific):
+            kv_tensor = self.get_tensor(name, model_specific)
+        else:
+            kv_tensor = self.alloc_tensor(shape, dtype, name, get_if_exists,
+                                          model_specific)
+        self.unlock_tensor(name, model_specific=False)
+        return kv_tensor
+
+    def free_kv_tensor(self) -> bool:
+        name = KV_TENSOR_NAME
+        model_specific = False  # KV tensor is not model-specific
+        return self.free_tensor(name, model_specific)
 
     def kv_pool_init(self, total_num_blocks: int, kv_block_bytes: int) -> bool:
         """Initialize KV block pool."""

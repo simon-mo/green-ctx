@@ -179,7 +179,7 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
                           f"Tensor {name} does not exist")
 
         tensor = self.tensors[name]
-        logger.info(f"Got tensor {name} ({tensor.shape}, {tensor.dtype})")
+        logger.debug(f"Got tensor {name} ({tensor.shape}, {tensor.dtype})")
         return gpu_service_pb2.TensorInfo(
             name=tensor.name,
             shape=list(tensor.shape),
@@ -225,29 +225,36 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
     def KVPoolInit(self, request, context):
         """Initialize KV block pool."""
         with self.kv_pool_lock:
-            if self.kv_pool is not None:
-                # another client already initialized, nothing to do
-                return gpu_service_pb2.KVPoolInitResponse(success=True)
+            logger.info(
+                f"Initializing KV pool for model {request.model_name} "
+                f"with {request.total_num_blocks} blocks of "
+                f"size {request.kv_block_bytes} bytes"
+            )
+            if self.kv_pool is None:
+                self.kv_pool = KVCachePool(request.total_num_blocks *
+                                           request.kv_block_bytes)
+            self.kv_pool.register_model(
+                model_name=request.model_name,
+                kv_block_bytes=request.kv_block_bytes)
 
-            self.kv_pool = KVCachePool(request.total_num_blocks,
-                                       request.kv_block_bytes)
             return gpu_service_pb2.KVPoolInitResponse(success=True)
 
     def KVPoolAlloc(self, request, context):
         """Allocate KV blocks from the pool for client.
         Returns list of block ids, or an empty list if not enough blocks."""
+        model_name = request.model_name
         num_blocks = request.num_blocks
         if num_blocks <= 0:
             context.abort(grpc.StatusCode.INVALID_ALLOC_REQUEST,
                           f"Cannot allocate {num_blocks} blocks.")
 
         with self.kv_pool_lock:
-            blocks = self.kv_pool.alloc(num_blocks)
+            blocks = self.kv_pool.alloc(model_name, num_blocks)
             if blocks is None:  # not enough blocks available
                 logger.warning(
                     f"KV pool allocation failed for {num_blocks} blocks")
                 return gpu_service_pb2.KVPoolAllocResponse(blocks=[])
-            logger.info(f"KV pool allocated blocks: {blocks}")
+            # logger.debug(f"KV pool allocated blocks: {blocks}")
             return gpu_service_pb2.KVPoolAllocResponse(blocks=blocks)
 
     def KVPoolFree(self, request, context):
@@ -256,7 +263,7 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             if self.kv_pool is None:
                 context.abort(grpc.StatusCode.NOT_FOUND,
                               "KV pool not initialized")
-            self.kv_pool.free(request.blocks)
+            self.kv_pool.free(request.model_name, request.blocks)
 
         return gpu_service_pb2.KVPoolFreeResponse(success=True)
 

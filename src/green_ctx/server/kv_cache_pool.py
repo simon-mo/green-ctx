@@ -3,7 +3,6 @@ from collections import defaultdict, deque
 from typing import Dict, List, Optional
 import logging
 
-
 SANITY_CHECK = False
 PAGE_BYTES = 2 * 1024 * 1024  # 2MB
 
@@ -194,26 +193,23 @@ class PageAllocator(PageAllocatorBase):
         return self.page_bytes // kv_block_bytes
 
 
-class KVCachePool:
+class ModelKVCachePool:
 
-    def __init__(self, num_blocks: int, kv_block_bytes: int) -> None:
-        self.num_blocks = num_blocks
+    def __init__(self, model_name: str, kv_block_bytes: int,
+                 page_allocator: PageAllocator) -> None:
+        self.model_name = model_name
         self.kv_block_bytes = kv_block_bytes
-
-        mem_size = self.num_blocks * self.kv_block_bytes
-        self.page_allocator = PageAllocator(mem_size, PAGE_BYTES)
+        self.page_allocator = page_allocator
 
         self.num_avail_blocks = 0  # Only count free blocks in avail_pages
         self.avail_pages: Dict[int, Page] = {}
         self.full_pages: Dict[int, Page] = {}
 
-        logger.info(
-            f"Init KVCachePool: "
-            f"num_blocks={num_blocks}, kv_block_bytes={kv_block_bytes}")
+        logger.info(f"Init KVCachePool for Model {model_name}: "
+                    f"kv_block_bytes={kv_block_bytes}")
         if PAGE_BYTES % kv_block_bytes != 0:
-            logger.warning(
-                f"PAGE_BYTES={PAGE_BYTES} is not aligned with "
-                f"kv_block_bytes={kv_block_bytes}")
+            logger.warning(f"PAGE_BYTES={PAGE_BYTES} is not aligned with "
+                           f"kv_block_bytes={kv_block_bytes}")
 
     def alloc(self, need_size: int) -> Optional[List[int]]:
         if self.available_size() < need_size:
@@ -276,4 +272,79 @@ class KVCachePool:
         return avail_size + free_size
 
     def clear(self):
-        raise NotImplementedError
+        if self.avail_pages or self.full_pages or self.num_avail_blocks > 0:
+            logger.warning(f"Clearing KVCachePool for model {self.model_name} "
+                           f"with {len(self.avail_pages)} available pages "
+                           f"and {len(self.full_pages)} full pages. "
+                           f"num_avail_blocks={self.num_avail_blocks}")
+
+        self.num_avail_blocks = 0
+        for _, page in self.avail_pages.items():
+            page.reset()
+            self.page_allocator.free_page(page)
+        for _, page in self.full_pages.items():
+            page.reset()
+            self.page_allocator.free_page(page)
+
+
+class KVCachePool:
+
+    def __init__(self, mem_bytes: int) -> None:
+        self.mem_bytes = mem_bytes
+        self.page_allocator = PageAllocator(self.mem_bytes, PAGE_BYTES)
+
+        self.model_kv_cache_pools: Dict[str, ModelKVCachePool] = {}
+        logger.info(f"Init KVCachePool: mem_bytes={mem_bytes}")
+
+    def register_model(self, model_name: str, kv_block_bytes: int) -> None:
+        if model_name in self.model_kv_cache_pools:
+            logger.warning(f"Model {model_name} is already registered.")
+            return
+
+        if PAGE_BYTES % kv_block_bytes != 0:
+            logger.warning(f"PAGE_BYTES={PAGE_BYTES} is not aligned with "
+                           f"kv_block_bytes={kv_block_bytes}")
+
+        self.model_kv_cache_pools[model_name] = ModelKVCachePool(
+            model_name=model_name,
+            kv_block_bytes=kv_block_bytes,
+            page_allocator=self.page_allocator)
+
+    def unregister_model(self, model_name: str) -> None:
+        if model_name not in self.model_kv_cache_pools:
+            logger.warning(f"Model {model_name} is not registered.")
+            return
+        self.model_kv_cache_pools[model_name].clear()
+        del self.model_kv_cache_pools[model_name]
+        logger.info(f"Unregistered model {model_name} from KVCachePool.")
+
+    def get_model_kv_cache_pool(self,
+                                model_name: str) -> Optional[ModelKVCachePool]:
+        if model_name not in self.model_kv_cache_pools:
+            logger.warning(f"Model {model_name} is not registered.")
+            return None
+        return self.model_kv_cache_pools[model_name]
+
+    def alloc(self, model_name: str, need_size: int) -> Optional[List[int]]:
+        assert model_name in self.model_kv_cache_pools, \
+            f"Model {model_name} is not registered in KVCachePool."
+        return self.get_model_kv_cache_pool(model_name).alloc(need_size)
+
+    def free(self, model_name: str, indices: List[int]):
+        assert model_name in self.model_kv_cache_pools, \
+            f"Model {model_name} is not registered in KVCachePool."
+        self.get_model_kv_cache_pool(model_name).free(indices)
+
+    def available_size(self, model_name: str) -> int:
+        assert model_name in self.model_kv_cache_pools, \
+            f"Model {model_name} is not registered in KVCachePool."
+        return self.get_model_kv_cache_pool(model_name).available_size()
+
+    def clear(self):
+        logger.info("Clearing KVCachePool...")
+        for model_name, kv_cache_pool in self.model_kv_cache_pools.items():
+            kv_cache_pool.clear()
+            logger.info(f"Cleared KVCachePool for model {model_name}.")
+        self.model_kv_cache_pools.clear()
+        self.page_allocator = PageAllocator(self.mem_bytes, PAGE_BYTES)
+        logger.info("KVCachePool cleared.")
