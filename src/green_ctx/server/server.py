@@ -166,8 +166,11 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
 
         del self.tensors[name]
         if name in self.tensor_locks:
+            if self.tensor_locks[name].locked():
+                context.abort(grpc.StatusCode.LOCKED,
+                              f"Tensor {name} is locked, cannot free")
             del self.tensor_locks[name]
-        logger.info(f"Freed tensor {name}")
+        logger.debug(f"Freed tensor {name}")
         return gpu_service_pb2.FreeTensorResponse(success=True)
 
     def GetTensor(self, request, context):
