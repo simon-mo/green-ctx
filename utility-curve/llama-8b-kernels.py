@@ -3,7 +3,7 @@ import torch.nn as nn
 from vllm.model_executor.layers.layernorm import RMSNorm
 from flash_attn import flash_attn_func, flash_attn_with_kvcache
 from green_ctx import make_shard
-from green_ctx.kernels import run_global_timer, run_sleep_kernel
+from green_ctx.kernels import run_global_timer, run_sleep_kernel, run_barrier_kernel
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.bfloat16)
@@ -63,7 +63,7 @@ def time_kernel(kernel, *args):
     return start.elapsed_time(end) / num_trials
 
 
-num_trials = 30
+num_trials = 50
 
 
 def concurrent_launch(kernel,
@@ -84,9 +84,12 @@ def concurrent_launch(kernel,
     if timing_buffer_tensor is not None:
         assert timing_buffer_tensor.numel() == num_streams * num_trials
 
+    barrier_buf = torch.zeros(1, dtype=torch.uint64)
+
     for i, ctx in enumerate(ctxs):
         with ctx.with_context(), ctx.with_torch_stream() as stream:
             stream_id = ctx.raw_stream_id
+            run_barrier_kernel(barrier_buf, num_streams, 10, stream=stream_id)
             stream_events[i][0].record()
             for j in range(num_trials):
                 kernel(*args)
@@ -121,6 +124,11 @@ def warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV):
     run_sleep_kernel(1)
     run_global_timer(torch.zeros(1, dtype=torch.uint64))
 
+    barrier_ptr = torch.zeros(1, dtype=torch.uint64)
+    stream_1 = torch.cuda.Stream()
+    stream_2 = torch.cuda.Stream()
+    run_barrier_kernel(barrier_ptr, 2, 1000000, stream=stream_1.cuda_stream)
+    run_barrier_kernel(barrier_ptr, 2, 1000000, stream=stream_2.cuda_stream)
     torch.cuda.synchronize()
 
 
@@ -184,27 +192,28 @@ def plot_timing(relative_timing):
 if __name__ == "__main__":
     # time all kernels
     # B, S = 1, 8192
-    B, S = 512, 8192
+    B, S = 8, 1
+
     # for matuls
-    # x_BSH = torch.randn(B, S, hidden_size)
-    # up_projected_BSH = up_proj(x_BSH)
+    x_BSH = torch.randn(B, S, hidden_size)
+    up_projected_BSH = up_proj(x_BSH)
     # for prefill attn
-    # qkv_BSH_HKV = qkv_proj(x_BSH)
+    qkv_BSH_HKV = qkv_proj(x_BSH)
     # for decode attn
-    # q_B1H = qkv_BSH_HKV[:, 0, :hidden_size]
-    q_B1H = torch.randn(B, 1, num_attention_heads, head_dim)
+    q_B1H = qkv_BSH_HKV[:, 0, :hidden_size]
+    # q_B1H = torch.randn(B, 1, num_attention_heads, head_dim)
     kv_cache_BS_KV = torch.randn(B, S, num_key_value_heads, head_dim * 2)
 
-    # warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV)
+    warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV)
 
     kernels = {
         # "rms_norm": rms_norm,
-        # "qkv_proj": qkv_proj,
+        "qkv_proj": qkv_proj,
         # "o_proj": o_proj,
         # "up_proj": up_proj,
         # "down_proj": down_proj,
         # "prefill_attn": prefill_attn,
-        "decode_attn": decode_attn,
+        # "decode_attn": decode_attn,
     }
 
     # print("standalone kernel time")
@@ -225,13 +234,13 @@ if __name__ == "__main__":
     #             print(f"{kernel_name},{time},{n}")
 
     print("concurrent kernel time")
-    timing_buffer_tensor = torch.zeros(num_trials * 4, dtype=torch.uint64)
+    timing_buffer_tensor = None
     scenarios = [
-        (8, [1, 2, 4, 8, 16, 32]),
-        (16, [1, 2, 4, 8, 16]),
+        # (8, [1, 2, 4, 8, 16, 32]),
+        # (16, [1, 2, 4, 8, 16]),
         (32, [1, 2, 4, 8]),
-        (64, [1, 2, 4]),
-        (128, [1, 2]),
+        # (64, [1, 2, 4]),
+        # (128, [1, 2]),
     ]
     print("kernel_name,time(ms),num_sms,num_streams")
     for num_sms, num_streams in scenarios:
@@ -254,10 +263,14 @@ if __name__ == "__main__":
                                              num_sms_per_stream=num_sms,
                                              num_streams=num_stream)
                 else:
-                    # if num_sms == 8 and num_stream == 4 and kernel_name == "rms_norm":
-                    #     timing_ = timing_buffer_tensor
-                    # else:
-                    timing_ = None
+                    if num_sms == 32 and num_stream == 4 and kernel_name == "qkv_proj":
+                        assert timing_buffer_tensor is None
+                        timing_buffer_tensor = torch.zeros(num_trials *
+                                                           num_stream,
+                                                           dtype=torch.uint64)
+                        timing_ = timing_buffer_tensor
+                    else:
+                        timing_ = None
                     time = concurrent_launch(kernel,
                                              x_BSH,
                                              num_sms_per_stream=num_sms,
@@ -266,6 +279,6 @@ if __name__ == "__main__":
                 time = sum(time) / len(time)
                 print(f"{kernel_name},{time},{num_sms},{num_stream}")
 
-    # timing_out = timing_buffer_tensor.reshape(4, num_trials).to(torch.float64)
-    # relatived_timing = timing_out - timing_out[0, 0]
-    # plot_timing(relatived_timing)
+    timing_out = timing_buffer_tensor.reshape(4, num_trials).to(torch.float64)
+    relatived_timing = timing_out - timing_out[0, 0]
+    plot_timing(relatived_timing)

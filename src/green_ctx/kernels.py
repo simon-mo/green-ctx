@@ -172,3 +172,42 @@ def run_sleep_kernel(time_us: int, stream=None):
     CHECK_CUDA(
         cuda.cuLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream,
                             time_ns_arg.ctypes.data, 0))
+
+
+wait_code = """
+// atomically wait for a specific value to present in memory
+// if the value is not present, sleep for some time
+
+typedef unsigned long long uint64_t;
+
+extern "C" __global__ void __barrier(uint64_t *d_value, uint64_t target_value, unsigned int sleep_time_ns) {
+    atomicAdd(d_value, 1);
+    __threadfence_system();  // Force visibility of our update
+
+    while (true) {
+        // Read the value using atomic operation to bypass cache
+        uint64_t current_value = atomicAdd(d_value, 0);  // Atomic read without modifying
+
+        if (current_value == target_value) {
+            break;
+        }
+
+        asm volatile("nanosleep.u32 %0;" : : "r"(sleep_time_ns));
+    }
+}
+"""
+
+
+def run_barrier_kernel(d_ptr, target_value, sleep_time_ns, stream=None):
+    kernel = compile_kernel(wait_code, "__barrier")
+    d_ptr_arg = np.array([d_ptr.data_ptr()], dtype=np.uint64)
+    target_value_arg = np.array([target_value], dtype=np.uint64)
+    sleep_time_ns_arg = np.array([sleep_time_ns], dtype=np.uint64)
+    args = np.array([
+        d_ptr_arg.ctypes.data, target_value_arg.ctypes.data,
+        sleep_time_ns_arg.ctypes.data
+    ],
+                    dtype=np.uint64)
+    CHECK_CUDA(
+        cuda.cuLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, stream,
+                            args.ctypes.data, 0))
