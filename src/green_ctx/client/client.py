@@ -9,13 +9,13 @@ import grpc
 from ..proto import gpu_service_pb2
 from ..proto import gpu_service_pb2_grpc
 
+from ..server.kv_cache_pool import KV_TENSOR_NAME
+
 from green_ctx import GreenContext, get_sms_by_spec, init
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-KV_TENSOR_NAME = "kvcache-pool"
 
 
 class GPUClient:
@@ -125,6 +125,19 @@ class GPUClient:
         request = gpu_service_pb2.UnlockTensorRequest(name=name)
         response = self.stub.UnlockTensor(request)
         return response.success
+
+    def set_kv_pool_memory_bytes(self, memory_bytes: int) -> bool:
+        """Set the total memory bytes allocated for KV cache."""
+        request = gpu_service_pb2.SetKVPoolMemoryBytesRequest(
+            memory_bytes=memory_bytes)
+        response = self.stub.SetKVPoolMemoryBytes(request)
+        return response.success
+
+    def get_kv_pool_memory_bytes(self) -> int:
+        """Get the total memory bytes allocated for KV cache."""
+        request = gpu_service_pb2.GetKVPoolMemoryBytesRequest()
+        response = self.stub.GetKVPoolMemoryBytes(request)
+        return response.memory_bytes
 
     def get_kv_tensor(self, shape: List[int], dtype: str) -> torch.Tensor:
         """Allocate a new tensor in GPU memory."""

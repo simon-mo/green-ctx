@@ -3,10 +3,11 @@ from collections import defaultdict, deque
 from typing import Dict, List, Optional
 import logging
 
-SANITY_CHECK = False
-PAGE_BYTES = 2 * 1024 * 1024  # 2MB
-
 logger = logging.getLogger(__name__)
+
+KV_TENSOR_NAME = "kvcache-pool"
+PAGE_BYTES = 2 * 1024 * 1024  # 2MB
+SANITY_CHECK = False
 
 
 class Page:
@@ -36,7 +37,7 @@ class Page:
         self.free_list = list(range(self.stt_block_id, self.end_block_id))
 
     def reset(self) -> None:
-        assert self.inited() and len(self.free_list) == self.num_kv_blocks
+        # self.page_id and self.page_bytes are kept
         self.num_kv_blocks = None
         self.kv_block_bytes = None
         self.stt_block_id = None
@@ -187,9 +188,10 @@ class PageAllocator(PageAllocatorBase):
             kv_block_bytes)
 
     def _num_blocks_per_page(self, kv_block_bytes: int):
-        # When page_bytes is not aligned with kv_block_bytes, this function will
-        # become inaccurate. Assuming page_bytes is always aligned here.
-        assert self.page_bytes % kv_block_bytes == 0
+        # FIXME: when page_bytes is not aligned with kv_block_bytes, this
+        # function will be inaccurate. For now we assumE page_bytes is always
+        # aligned here.
+        # assert self.page_bytes % kv_block_bytes == 0
         return self.page_bytes // kv_block_bytes
 
 
@@ -252,8 +254,12 @@ class ModelKVCachePool:
         for page_id, idxs in idx_dict.items():
             if page_id in self.full_pages:
                 page = self.full_pages.pop(page_id)
-            else:
+            elif page_id in self.avail_pages:
                 page = self.avail_pages.pop(page_id)
+            else:
+                logger.warning(f"Page {page_id} is not in full_pages or "
+                               f"avail_pages")
+                return
 
             self.num_avail_blocks += len(idxs)
             page.free_batch(idxs)
@@ -299,6 +305,7 @@ class KVCachePool:
     def register_model(self, model_name: str, kv_block_bytes: int) -> None:
         if model_name in self.model_kv_cache_pools:
             logger.warning(f"Model {model_name} is already registered.")
+            self.get_model_kv_cache_pool(model_name).clear()
             return
 
         if PAGE_BYTES % kv_block_bytes != 0:

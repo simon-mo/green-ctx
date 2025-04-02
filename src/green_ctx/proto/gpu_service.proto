@@ -21,6 +21,10 @@ service GPUService {
   rpc KVPoolInit(KVPoolInitRequest) returns (KVPoolInitResponse) {}
   rpc KVPoolAlloc(KVPoolAllocRequest) returns (KVPoolAllocResponse) {}
   rpc KVPoolFree(KVPoolFreeRequest) returns (KVPoolFreeResponse) {}
+
+  // KV cache management
+  rpc SetKVPoolMemoryBytes(SetKVPoolMemoryBytesRequest) returns (SetKVPoolMemoryBytesResponse) {}
+  rpc GetKVPoolMemoryBytes(GetKVPoolMemoryBytesRequest) returns (GetKVPoolMemoryBytesResponse) {}
 }
 
 // Health check messages
@@ -58,13 +62,13 @@ message FreeSMsResponse {
 // Tensor management messages
 message TensorInfo {
   string name = 1;
-  repeated int32 shape = 2;
+  repeated int64 shape = 2;
   string dtype = 3;
   bytes serialized_info = 4;
 }
 
 message AllocTensorRequest {
-  repeated int32 shape = 1;
+  repeated int64 shape = 1;
   string dtype = 2;
   string name = 3;
   bool get_if_exists = 4;
@@ -132,4 +136,19 @@ message KVPoolFreeRequest {
 
 message KVPoolFreeResponse {
   bool success = 1;
+}
+
+message SetKVPoolMemoryBytesRequest {
+  int64 memory_bytes = 1;
+}
+
+message SetKVPoolMemoryBytesResponse {
+  bool success = 1;
+}
+
+message GetKVPoolMemoryBytesRequest {}
+
+message GetKVPoolMemoryBytesResponse {
+  int64 memory_bytes = 1;
+  bool success = 2;
 }

@@ -10,7 +10,7 @@ import torch
 from torch.multiprocessing.reductions import reduce_tensor
 import uuid
 
-from .kv_cache_pool import KVCachePool
+from .kv_cache_pool import KVCachePool, KV_TENSOR_NAME, PAGE_BYTES
 
 from ..proto import gpu_service_pb2
 from ..proto import gpu_service_pb2_grpc
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Default server configuration
 DEFAULT_PORT = 50051
+DEFAULT_KVPOOL_SIZE_GB = 30
 
 DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
@@ -38,7 +39,7 @@ class TensorMetadata:
 
 class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
 
-    def __init__(self):
+    def __init__(self, kvpool_size_gb: int = DEFAULT_KVPOOL_SIZE_GB):
         # Initialize resource tracking
         self.total_sms = 120
         self.total_groups = self.total_sms // 8
@@ -52,7 +53,10 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         self.kv_pool: Optional[KVCachePool] = None
         self.kv_pool_lock = Lock()
 
-        logger.info(f"Initializing GPU server with {self.total_sms} SMs")
+        kvpool_mem_bytes = kvpool_size_gb * 1024**3
+        self._init_kv_pool(kvpool_mem_bytes)
+        logger.info(f"Initializing GPU server with {self.total_sms} SMs and "
+                    f"{kvpool_size_gb} GB KV pool")
 
     @property
     def available_sms(self):
@@ -228,17 +232,15 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
     def KVPoolInit(self, request, context):
         """Initialize KV block pool."""
         with self.kv_pool_lock:
-            logger.info(
-                f"Initializing KV pool for model {request.model_name} "
-                f"with {request.total_num_blocks} blocks of "
-                f"size {request.kv_block_bytes} bytes"
-            )
+            logger.info(f"Initializing KV pool for model {request.model_name} "
+                        f"with {request.total_num_blocks} blocks of "
+                        f"size {request.kv_block_bytes} bytes")
             if self.kv_pool is None:
-                self.kv_pool = KVCachePool(request.total_num_blocks *
-                                           request.kv_block_bytes)
-            self.kv_pool.register_model(
-                model_name=request.model_name,
-                kv_block_bytes=request.kv_block_bytes)
+                self.SetKVCacheMemoryBytes(
+                    gpu_service_pb2.SetKVCacheMemoryBytesRequest(
+                        memory_bytes=request.memory_bytes), context)
+            self.kv_pool.register_model(model_name=request.model_name,
+                                        kv_block_bytes=request.kv_block_bytes)
 
             return gpu_service_pb2.KVPoolInitResponse(success=True)
 
@@ -270,14 +272,63 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
 
         return gpu_service_pb2.KVPoolFreeResponse(success=True)
 
+    def SetKVPoolMemoryBytes(self, request, context):
+        """Set the total memory bytes allocated for KV cache."""
+        success = self._init_kv_pool(request.memory_bytes)
+        return gpu_service_pb2.SetKVPoolMemoryBytesResponse(success=success)
+
+    def GetKVPoolMemoryBytes(self, request, context):
+        """Get the total memory bytes allocated for KV cache."""
+        if self.kv_pool is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, "KV pool not initialized")
+        return gpu_service_pb2.GetKVPoolMemoryBytesResponse(
+            memory_bytes=self.kv_pool.mem_bytes)
+
+    def _init_kv_pool(self, memory_bytes: int) -> bool:
+        """Initialize the KV pool with the given memory size."""
+        if self.kv_pool is not None:
+            logger.error("KV pool has already been initialized")
+            return False
+        with self.global_lock:
+            if KV_TENSOR_NAME not in self.tensor_locks:
+                self.tensor_locks[KV_TENSOR_NAME] = Lock()
+        self.tensor_locks[KV_TENSOR_NAME].acquire()
+        if self.tensors.get(KV_TENSOR_NAME) is not None:
+            logger.error(f"KV tensor {KV_TENSOR_NAME} already exists")
+            return False
+        else:
+            aligned_bytes = (memory_bytes + PAGE_BYTES - 1) // PAGE_BYTES * PAGE_BYTES
+            shape = [aligned_bytes // 2]
+            dtype = "bfloat16"
+
+            value = torch.empty(shape, dtype=DTYPE_MAP[dtype], device="cuda")
+            reduced = pickle.dumps(reduce_tensor(value))
+            assert len(
+                reduced
+            ) < 2 * 1024 * 1024, f"Tensor is too large to serialize ({len(reduced)} bytes)"
+
+            tensor = TensorMetadata(
+                shape=tuple(shape),
+                dtype=dtype,
+                name=KV_TENSOR_NAME,
+                serialized_info=reduced,
+                value=value,
+            )
+            self.tensors[KV_TENSOR_NAME] = tensor
+        self.tensor_locks[KV_TENSOR_NAME].release()
+
+        self.kv_pool = KVCachePool(mem_bytes=memory_bytes)
+        return True
 
 class GPUServer:
 
-    def __init__(self, port: int = DEFAULT_PORT):
+    def __init__(self,
+                 port: int = DEFAULT_PORT,
+                 kvpool_size_gb: int = DEFAULT_KVPOOL_SIZE_GB):
         self.port = port
         self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
         gpu_service_pb2_grpc.add_GPUServiceServicer_to_server(
-            GPUServicer(), self.server)
+            GPUServicer(kvpool_size_gb=kvpool_size_gb), self.server)
 
     def start(self):
         """Start the server and listen for requests."""
