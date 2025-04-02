@@ -207,13 +207,13 @@ if __name__ == "__main__":
     warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV)
 
     kernels = {
-        # "rms_norm": rms_norm,
+        "rms_norm": rms_norm,
         "qkv_proj": qkv_proj,
-        # "o_proj": o_proj,
-        # "up_proj": up_proj,
-        # "down_proj": down_proj,
-        # "prefill_attn": prefill_attn,
-        # "decode_attn": decode_attn,
+        "o_proj": o_proj,
+        "up_proj": up_proj,
+        "down_proj": down_proj,
+        "prefill_attn": prefill_attn,
+        "decode_attn": decode_attn,
     }
 
     # print("standalone kernel time")
