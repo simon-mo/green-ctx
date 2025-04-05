@@ -272,6 +272,15 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
 
         return gpu_service_pb2.KVPoolFreeResponse(success=True)
 
+    def GetKVPoolUsage(self, request, context):
+        """Get the current usage of the KV cache pool."""
+        if self.kv_pool is None:
+            context.abort(grpc.StatusCode.NOT_FOUND, "KV pool not initialized")
+        return gpu_service_pb2.GetKVPoolUsageResponse(
+            total_blocks=self.kv_pool.total_blocks,
+            used_blocks=self.kv_pool.used_blocks,
+            free_blocks=self.kv_pool.free_blocks)
+
     def SetKVPoolMemoryBytes(self, request, context):
         """Set the total memory bytes allocated for KV cache."""
         success = self._init_kv_pool(request.memory_bytes)
@@ -297,7 +306,8 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             logger.error(f"KV tensor {KV_TENSOR_NAME} already exists")
             return False
         else:
-            aligned_bytes = (memory_bytes + PAGE_BYTES - 1) // PAGE_BYTES * PAGE_BYTES
+            aligned_bytes = (memory_bytes + PAGE_BYTES -
+                             1) // PAGE_BYTES * PAGE_BYTES
             shape = [aligned_bytes // 2]
             dtype = "bfloat16"
 

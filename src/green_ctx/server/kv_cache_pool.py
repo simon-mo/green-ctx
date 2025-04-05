@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -277,6 +277,16 @@ class ModelKVCachePool:
             self.kv_block_bytes)
         return avail_size + free_size
 
+    def usage(self) -> Tuple[int, int, int]:
+        num_total_blocks = self.page_allocator.get_num_total_blocks(
+            self.kv_block_bytes)
+        num_free_blocks = self.available_size()
+        num_used_blocks = num_total_blocks - num_free_blocks
+        if num_used_blocks < 0:
+            logger.warning(f"num_used_blocks={num_used_blocks} < 0")
+            num_used_blocks = 0
+        return num_total_blocks, num_used_blocks, num_free_blocks
+
     def clear(self):
         if self.avail_pages or self.full_pages or self.num_avail_blocks > 0:
             logger.warning(f"Clearing KVCachePool for model {self.model_name} "
@@ -346,6 +356,11 @@ class KVCachePool:
         assert model_name in self.model_kv_cache_pools, \
             f"Model {model_name} is not registered in KVCachePool."
         return self.get_model_kv_cache_pool(model_name).available_size()
+
+    def usage(self, model_name: str) -> Tuple[int, int, int]:
+        assert model_name in self.model_kv_cache_pools, \
+            f"Model {model_name} is not registered in KVCachePool."
+        return self.get_model_kv_cache_pool(model_name).usage()
 
     def clear(self):
         logger.info("Clearing KVCachePool...")

@@ -75,6 +75,11 @@ class GPUServiceStub(object):
                 request_serializer=gpu__service__pb2.KVPoolFreeRequest.SerializeToString,
                 response_deserializer=gpu__service__pb2.KVPoolFreeResponse.FromString,
                 )
+        self.GetKVPoolUsage = channel.unary_unary(
+                '/green_ctx.proto.GPUService/GetKVPoolUsage',
+                request_serializer=gpu__service__pb2.GetKVPoolUsageRequest.SerializeToString,
+                response_deserializer=gpu__service__pb2.GetKVPoolUsageResponse.FromString,
+                )
         self.SetKVPoolMemoryBytes = channel.unary_unary(
                 '/green_ctx.proto.GPUService/SetKVPoolMemoryBytes',
                 request_serializer=gpu__service__pb2.SetKVPoolMemoryBytesRequest.SerializeToString,
@@ -149,7 +154,8 @@ class GPUServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def KVPoolInit(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """KV cache usage
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -161,6 +167,12 @@ class GPUServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def KVPoolFree(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetKVPoolUsage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -241,6 +253,11 @@ def add_GPUServiceServicer_to_server(servicer, server):
                     servicer.KVPoolFree,
                     request_deserializer=gpu__service__pb2.KVPoolFreeRequest.FromString,
                     response_serializer=gpu__service__pb2.KVPoolFreeResponse.SerializeToString,
+            ),
+            'GetKVPoolUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetKVPoolUsage,
+                    request_deserializer=gpu__service__pb2.GetKVPoolUsageRequest.FromString,
+                    response_serializer=gpu__service__pb2.GetKVPoolUsageResponse.SerializeToString,
             ),
             'SetKVPoolMemoryBytes': grpc.unary_unary_rpc_method_handler(
                     servicer.SetKVPoolMemoryBytes,
@@ -464,6 +481,23 @@ class GPUService(object):
         return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/KVPoolFree',
             gpu__service__pb2.KVPoolFreeRequest.SerializeToString,
             gpu__service__pb2.KVPoolFreeResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetKVPoolUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/green_ctx.proto.GPUService/GetKVPoolUsage',
+            gpu__service__pb2.GetKVPoolUsageRequest.SerializeToString,
+            gpu__service__pb2.GetKVPoolUsageResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

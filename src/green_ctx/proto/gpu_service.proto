@@ -18,9 +18,12 @@ service GPUService {
   rpc ExistTensor(ExistTensorRequest) returns (ExistTensorResponse) {}
   rpc LockTensor(LockTensorRequest) returns (LockTensorResponse) {}
   rpc UnlockTensor(UnlockTensorRequest) returns (UnlockTensorResponse) {}
+
+  // KV cache usage
   rpc KVPoolInit(KVPoolInitRequest) returns (KVPoolInitResponse) {}
   rpc KVPoolAlloc(KVPoolAllocRequest) returns (KVPoolAllocResponse) {}
   rpc KVPoolFree(KVPoolFreeRequest) returns (KVPoolFreeResponse) {}
+  rpc GetKVPoolUsage(GetKVPoolUsageRequest) returns (GetKVPoolUsageResponse) {}
 
   // KV cache management
   rpc SetKVPoolMemoryBytes(SetKVPoolMemoryBytesRequest) returns (SetKVPoolMemoryBytesResponse) {}
@@ -136,6 +139,16 @@ message KVPoolFreeRequest {
 
 message KVPoolFreeResponse {
   bool success = 1;
+}
+
+message GetKVPoolUsageRequest {
+  string model_name = 1;
+}
+
+message GetKVPoolUsageResponse {
+  int32 num_total_blocks = 1;
+  int32 num_used_blocks = 2;
+  int32 num_free_blocks = 3;
 }
 
 message SetKVPoolMemoryBytesRequest {

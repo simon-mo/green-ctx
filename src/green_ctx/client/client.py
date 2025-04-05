@@ -181,6 +181,16 @@ class GPUClient:
         response = self.stub.KVPoolFree(request)
         return response.success
 
+    def get_kv_pool_usage(self) -> Dict[str, int]:
+        """Get the current usage of the KV pool."""
+        request = gpu_service_pb2.GetKVPoolUsageRequest(model_name=self.model_name)
+        response = self.stub.GetKVPoolUsage(request)
+        return {
+            "total_blocks": response.num_total_blocks,
+            "used_blocks": response.num_used_blocks,
+            "free_blocks": response.num_free_blocks
+        }
+
     def close(self):
         """Close the connection to the server."""
         for name in list(self.anon_tensors):
