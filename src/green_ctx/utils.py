@@ -39,11 +39,8 @@ def set_cublas_sm_count(sm_count: Optional[int] = None):
 
 def CHECK_CUDA(result):
     if result[0].value:
-        raise RuntimeError(
-            "CUDA error code={}({})".format(
-                result[0].value, _cudaGetErrorEnum(result[0])
-            )
-        )
+        raise RuntimeError("CUDA error code={}({})".format(
+            result[0].value, _cudaGetErrorEnum(result[0])))
     if len(result) == 1:
         return None
     elif len(result) == 2:

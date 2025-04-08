@@ -37,7 +37,7 @@ class GreenContext:
     primary_context: Any = None
 
     raw_stream: Any = None
-    raw_stream_id: int = 0
+    raw_stream_id: int = -1
 
     @contextmanager
     def with_context(self):
@@ -181,9 +181,10 @@ def get_sms_by_spec(num_groups: int,
 
 
 def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
-    assert (
-        sm_request >= 8 and sm_request % 8 == 0
-    ), "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
+    if sm_request != 132:
+        assert (
+            sm_request >= 8 and sm_request % 8 == 0
+        ), "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
 
     # Get SM resource
     sm_resource = CHECK_CUDA(
