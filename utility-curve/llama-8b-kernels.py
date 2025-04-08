@@ -9,6 +9,8 @@ from green_ctx import make_shard
 from green_ctx.kernels import run_global_timer, run_sleep_kernel, run_barrier_kernel
 from triton.testing import do_bench_cudagraph
 
+import argparse
+
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.bfloat16)
 
@@ -212,9 +214,9 @@ def warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV,
     torch.cuda.synchronize()
 
 
-def plot_timing(relative_timing):
+def plot_timing(relative_timing, timing_out):
     # Convert timing data to milliseconds for better readability
-    timing_ms = relatived_timing.float(
+    timing_ms = relative_timing.float(
     ) / 1e6  # Convert from nanoseconds to milliseconds
 
     import matplotlib.pyplot as plt
@@ -269,114 +271,88 @@ def plot_timing(relative_timing):
     plt.show()
 
 
-if __name__ == "__main__":
-    # time all kernels
-    B, S = 1, 2048
-    # B, S = 8, 1
+def run_standalone_benchmark(kernels, x_BSH, up_projected_BSH, qkv_BSH_HKV,
+                             q_B1H, kv_cache_BS_KV, cu_seqlens_q):
+    print("standalone kernel time")
+    num_sms = [8, 16, 32, 48, 64, 80, 96, 112, 128, 132]
+    ctxs = [make_shard(i) for i in num_sms]
+    print("kernel_name,time(ms),num_sms")
+    for kernel_name, kernel in kernels.items():
+        for ctx, n in zip(ctxs, num_sms):
+            with ctx.with_context():
+                if kernel_name == "prefill_attn":
+                    time = time_kernel(kernel,
+                                       qkv_BSH_HKV,
+                                       cu_seqlens_q,
+                                       sm_margin=132 - n)
+                elif kernel_name == "decode_attn":
+                    time = time_kernel(kernel,
+                                       q_B1H,
+                                       kv_cache_BS_KV,
+                                       sm_margin=132 - n)
+                elif kernel_name == "down_proj":
+                    time = time_kernel(kernel, up_projected_BSH)
+                else:
+                    time = time_kernel(kernel, x_BSH)
+                print(f"{kernel_name},{time},{n}")
 
-    # for matuls
-    x_BSH = torch.randn(B, S, hidden_size)
-    up_projected_BSH = up_proj(x_BSH)
-    # for prefill attn
-    qkv_BSH_HKV = qkv_proj(x_BSH)
-    # for decode attn
-    q_B1H = qkv_BSH_HKV[:, 0, :hidden_size]
-    # q_B1H = torch.randn(B, 1, num_attention_heads, head_dim)
-    kv_cache_BS_KV = torch.randn(B, S, num_key_value_heads, head_dim * 2)
 
-    cu_seqlens_q = torch.arange(B + 1, dtype=torch.int32) * S
+def run_concurrent_benchmark(kernels, x_BSH, up_projected_BSH, qkv_BSH_HKV,
+                             q_B1H, kv_cache_BS_KV, cu_seqlens_q):
+    print("concurrent kernel time")
+    timing_buffer_tensor = None
+    scenarios = [
+        # (8, [1, 2, 4, 8, 16, 32]),
+        # (16, [1, 2, 4, 8, 16]),
+        (32, [1, 2, 4, 8]),
+        (64, [1, 2, 4]),
+        (128, [1, 2]),
+    ]
+    print("kernel_name,time(ms),num_sms,num_streams")
+    collected_timing_data = None
+    for num_sms, num_streams in scenarios:
+        for num_stream in num_streams:
+            for kernel_name, kernel in kernels.items():
+                timing_buffer = None
+                if num_sms == 32 and num_stream == 4 and kernel_name == "qkv_proj":
+                    # Allocate buffer only for the specific scenario to plot
+                    timing_buffer = torch.zeros(num_trials * num_stream,
+                                                dtype=torch.uint64)
+                    collected_timing_data = timing_buffer  # Keep a reference for plotting
 
-    warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV,
-                  cu_seqlens_q)
+                if kernel_name == "prefill_attn":
+                    args = (qkv_BSH_HKV, cu_seqlens_q)
+                    kwargs = {"sm_margin": 132 - num_sms}
+                elif kernel_name == "decode_attn":
+                    args = (q_B1H, kv_cache_BS_KV)
+                    kwargs = {"sm_margin": 132 - num_sms}
+                elif kernel_name == "down_proj":
+                    args = (up_projected_BSH, )
+                    kwargs = {}
+                else:
+                    args = (x_BSH, )
+                    kwargs = {}
 
-    kernels = {
-        "rms_norm": rms_norm,
-        "qkv_proj": qkv_proj,
-        "o_proj": o_proj,
-        "up_proj": up_proj,
-        "down_proj": down_proj,
-        "prefill_attn": prefill_attn,
-        "decode_attn": decode_attn,
-    }
+                times = concurrent_launch(kernel,
+                                          args=args,
+                                          kwargs=kwargs,
+                                          num_sms_per_stream=num_sms,
+                                          num_streams=num_stream,
+                                          timing_buffer_tensor=timing_buffer)
 
-    # print("standalone kernel time")
-    # num_sms = [8, 16, 32, 48, 64, 80, 96, 112, 128, 132]
-    # ctxs = [make_shard(i) for i in num_sms]
-    # print("kernel_name,time(ms),num_sms")
-    # for kernel_name, kernel in kernels.items():
-    #     for ctx, n in zip(ctxs, num_sms):
-    #         with ctx.with_context():
-    #             if kernel_name == "prefill_attn":
-    #                 time = time_kernel(kernel,
-    #                                    qkv_BSH_HKV,
-    #                                    cu_seqlens_q,
-    #                                    sm_margin=132 - n)
-    #             elif kernel_name == "decode_attn":
-    #                 time = time_kernel(kernel,
-    #                                    q_B1H,
-    #                                    kv_cache_BS_KV,
-    #                                    sm_margin=132 - n)
-    #             elif kernel_name == "down_proj":
-    #                 time = time_kernel(kernel, up_projected_BSH)
-    #             else:
-    #                 time = time_kernel(kernel, x_BSH)
-    #             print(f"{kernel_name},{time},{n}")
+                time = sum(times) / len(times)
+                print(f"{kernel_name},{time},{num_sms},{num_stream}")
 
-    # print("concurrent kernel time")
-    # timing_buffer_tensor = None
-    # scenarios = [
-    #     # (8, [1, 2, 4, 8, 16, 32]),
-    #     # (16, [1, 2, 4, 8, 16]),
-    #     (32, [1, 2, 4, 8]),
-    #     # (64, [1, 2, 4]),
-    #     # (128, [1, 2]),
-    # ]
-    # print("kernel_name,time(ms),num_sms,num_streams")
-    # for num_sms, num_streams in scenarios:
-    #     for num_stream in num_streams:
-    #         for kernel_name, kernel in kernels.items():
-    #             if kernel_name == "prefill_attn":
-    #                 time = concurrent_launch(
-    #                     kernel,
-    #                     args=(qkv_BSH_HKV, cu_seqlens_q),
-    #                     kwargs={"sm_margin": 132 - num_sms},
-    #                     num_sms_per_stream=num_sms,
-    #                     num_streams=num_stream)
-    #             elif kernel_name == "decode_attn":
-    #                 time = concurrent_launch(
-    #                     kernel,
-    #                     args=(q_B1H, kv_cache_BS_KV),
-    #                     kwargs={"sm_margin": 132 - num_sms},
-    #                     num_sms_per_stream=num_sms,
-    #                     num_streams=num_stream)
-    #             elif kernel_name == "down_proj":
-    #                 time = concurrent_launch(kernel,
-    #                                          args=(up_projected_BSH, ),
-    #                                          kwargs={},
-    #                                          num_sms_per_stream=num_sms,
-    #                                          num_streams=num_stream)
-    #             else:
-    #                 if num_sms == 32 and num_stream == 4 and kernel_name == "qkv_proj":
-    #                     assert timing_buffer_tensor is None
-    #                     timing_buffer_tensor = torch.zeros(num_trials *
-    #                                                        num_stream,
-    #                                                        dtype=torch.uint64)
-    #                     timing_ = timing_buffer_tensor
-    #                 else:
-    #                     timing_ = None
-    #                 time = concurrent_launch(kernel,
-    #                                          args=(x_BSH, ),
-    #                                          kwargs={},
-    #                                          num_sms_per_stream=num_sms,
-    #                                          num_streams=num_stream,
-    #                                          timing_buffer_tensor=timing_)
-    #             time = sum(time) / len(time)
-    #             print(f"{kernel_name},{time},{num_sms},{num_stream}")
+    if collected_timing_data is not None:
+        # Assuming the timing data collected was for num_stream=4
+        timing_out = collected_timing_data.reshape(4, num_trials).to(
+            torch.float64)
+        relative_timing = timing_out - timing_out[0, 0]
+        plot_timing(relative_timing, timing_out)
 
-    # timing_out = timing_buffer_tensor.reshape(4, num_trials).to(torch.float64)
-    # relatived_timing = timing_out - timing_out[0, 0]
-    # plot_timing(relatived_timing)
 
+def run_multiplexed_benchmark(kernels, x_BSH, up_projected_BSH, qkv_BSH_HKV,
+                              q_B1H, kv_cache_BS_KV, cu_seqlens_q):
     print("multiplexed launch")
 
     qkv_process_sm_64_first = Process(
@@ -423,3 +399,49 @@ if __name__ == "__main__":
             standalone_time = time_kernel(p.kernel, *p.args, **p.kwargs)
             standalone_times.append(standalone_time)
         print(f"{name=} {times=} {standalone_times=}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Benchmark different kernel execution scenarios.")
+    parser.add_argument("mode",
+                        choices=["standalone", "concurrent", "multiplexed"],
+                        help="Select the benchmark mode to run.")
+    parser.add_argument("--B", type=int, default=1, help="Batch size")
+    parser.add_argument("--S", type=int, default=2048, help="Sequence length")
+    args = parser.parse_args()
+
+    B, S = args.B, args.S
+
+    # Common setup: create tensors
+    x_BSH = torch.randn(B, S, hidden_size)
+    up_projected_BSH = up_proj(x_BSH)
+    qkv_BSH_HKV = qkv_proj(x_BSH)
+    q_B1H = qkv_BSH_HKV[:, 0, :hidden_size]
+    kv_cache_BS_KV = torch.randn(B, S, num_key_value_heads, head_dim * 2)
+    cu_seqlens_q = torch.arange(B + 1, dtype=torch.int32) * S
+
+    # Common setup: warmup
+    warmup_device(x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H, kv_cache_BS_KV,
+                  cu_seqlens_q)
+
+    kernels = {
+        # "rms_norm": rms_norm,
+        "qkv_proj": qkv_proj,
+        # "o_proj": o_proj,
+        "up_proj": up_proj,
+        # "down_proj": down_proj,
+        "prefill_attn": prefill_attn,
+        # "decode_attn": decode_attn,
+    }
+
+    # Select and run the chosen benchmark mode
+    common_args = (kernels, x_BSH, up_projected_BSH, qkv_BSH_HKV, q_B1H,
+                   kv_cache_BS_KV, cu_seqlens_q)
+
+    if args.mode == "standalone":
+        run_standalone_benchmark(*common_args)
+    elif args.mode == "concurrent":
+        run_concurrent_benchmark(*common_args)
+    elif args.mode == "multiplexed":
+        run_multiplexed_benchmark(*common_args)

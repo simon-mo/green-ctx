@@ -180,3 +180,4 @@ pyrightconfig.json
 *.qdstrm
 *.out
 *.png
+*.ncu-rep
