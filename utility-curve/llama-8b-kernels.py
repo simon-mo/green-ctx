@@ -169,6 +169,7 @@ def multiplexed_launch(processes: List[Process],
     barrier_buf = torch.zeros(1, dtype=torch.uint64)
     for i, process in enumerate(processes):
         with process.with_stream() as stream_id:
+            # NOTE(simon): this hangs, very weird
             # run_barrier_kernel(barrier_buf,
             #                    len(processes),
             #                    10,
