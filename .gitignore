@@ -181,3 +181,6 @@ pyrightconfig.json
 *.out
 *.png
 *.ncu-rep
+
+*.o
+vectoradd

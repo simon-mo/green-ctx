@@ -28,7 +28,7 @@ __global__ void vecAdd(double *a, double *b, double *c, int n) {
 
 int main(int argc, char *argv[]) {
     // Size of vectors
-    int n = 100000;
+    int n = 10000000;
     if (argc > 1) n = atoi(argv[1]);
 
     // Host input vectors
@@ -77,8 +77,20 @@ int main(int argc, char *argv[]) {
     // Number of thread blocks in grid
     gridSize = (int)ceil((float)n / blockSize);
 
+    // Timing events
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
+
     // Execute the kernel
     CUDA_SAFECALL((vecAdd<<<gridSize, blockSize>>>(d_a, d_b, d_c, n)));
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("Kernel execution time: %.2f milliseconds\n", milliseconds);
 
     // Copy array back to host
     cudaMemcpy(h_c, d_c, bytes, cudaMemcpyDeviceToHost);
