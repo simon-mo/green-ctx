@@ -184,3 +184,6 @@ pyrightconfig.json
 
 *.o
 vectoradd
+
+# Local vLLM clone
+# vllm/

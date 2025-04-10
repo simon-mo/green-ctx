@@ -6,3 +6,6 @@ start-mps:
 
 stop-mps:
     echo quit | sudo nvidia-cuda-mps-control
+
+build-vllm:
+    VLLM_USE_PRECOMPILED=1 uv pip install -e . --verbose --no-build-isolation

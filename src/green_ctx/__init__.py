@@ -8,7 +8,7 @@ from contextlib import contextmanager
 import math
 from functools import cached_property
 import os
-
+from functools import lru_cache
 from .utils import CHECK_CUDA, set_cublas_sm_count
 
 device = None
@@ -178,6 +178,11 @@ def get_sms_by_spec(num_groups: int,
                           cuda.cuCtxFromGreenCtx(green_ctx)))
 
     return gc
+
+
+@lru_cache(maxsize=None)
+def make_shard_cached(sm_request: int, resource_idx: int = 0) -> GreenContext:
+    return make_shard(sm_request, resource_idx)
 
 
 def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
