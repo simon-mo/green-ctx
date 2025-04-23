@@ -1,0 +1,11 @@
+list:
+    @just --list
+
+profile:
+    #!/usr/bin/env bash
+    # --capture-range-end=stop \
+    nsys profile \
+        --trace-fork-before-exec=true --cuda-graph-trace=node \
+        --capture-range=cudaProfilerApi \
+        -x true \
+        python two-llms.py

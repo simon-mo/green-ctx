@@ -9,7 +9,7 @@ import math
 from functools import cached_property
 import os
 from functools import lru_cache
-from .utils import CHECK_CUDA, set_cublas_sm_count
+from .utils import CHECK_CUDA, set_cublas_sm_count, set_vllm_flash_attn_sm_count
 
 device = None
 
@@ -42,7 +42,8 @@ class GreenContext:
     @contextmanager
     def with_context(self):
         cuda.cuCtxPushCurrent(self.primary_context)
-        with set_cublas_sm_count(self.sm_count):
+        with set_cublas_sm_count(self.sm_count), set_vllm_flash_attn_sm_count(
+                self.sm_count):
             yield
         cuda.cuCtxPopCurrent()
 
@@ -138,6 +139,7 @@ def get_sms_in_range(start: int,
     return gc
 
 
+@lru_cache(maxsize=None)
 def get_sms_by_spec(num_groups: int,
                     min_size: int,
                     indices: List[int],

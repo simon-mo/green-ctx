@@ -1,0 +1,34 @@
+list:
+    @just --list
+
+
+_start-server port memory-utilization:
+    vllm serve RedHatAI/Meta-Llama-3-8B-Instruct-FP8 --load-format dummy --port {{port}} --gpu-memory-utilization {{memory-utilization}} --no-enable-prefix-caching --disable-log-requests
+
+start-server-1:
+    #!/bin/zsh
+    export VLLM_GTX_SM_SPEC_FILE=./proc-1.json
+    just _start-server 8100 0.47
+
+start-server-2:
+    #!/bin/zsh
+    export VLLM_GTX_SM_SPEC_FILE=./proc-2.json
+    just _start-server 8101 0.95
+
+benchmark port *args:
+    python ../../vllm-green-ctx/benchmarks/benchmark_serving.py \
+        --model RedHatAI/Meta-Llama-3-8B-Instruct-FP8 \
+        --dataset-name random --ignore-eos \
+        --num-prompts 200 \
+        --random-input-len 1000 --random-output-len 100 \
+        --request-rate 20 \
+        --max-concurrency 50 \
+        --port {{port}} \
+        --skip-test-run \
+        {{args}}
+
+concurrent-2:
+    #!/bin/zsh
+    just benchmark 8100 &
+    just benchmark 8101 &
+    wait
