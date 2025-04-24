@@ -16,24 +16,24 @@ b = torch.randn((8192, 1024))
 def worker_thread(operation, name, barrier, stop_event, gtx=None):
     wait_time_iter = cycle(np.random.poisson(lam=1, size=1000).tolist())
 
-    barrier.wait()
     stream = torch.cuda.Stream()
 
     cnt = 0
     if gtx is not None:
-        ctx = gtx.with_context()
+        gtx.with_context().__enter__()
     else:
-        ctx = nullcontext()
+        torch.cuda.stream(stream).__enter__()
 
-    with ctx, torch.cuda.stream(stream):
-        while not stop_event.is_set():
-            wait_time = next(wait_time_iter)
-            if wait_time > 0:
-                time.sleep(wait_time / 1e6)  # sleep 1-5 us possion distributed
-            operation()
-            stream.synchronize()
-            cnt += 1
+    barrier.wait()
+
+    while not stop_event.is_set():
+        wait_time = next(wait_time_iter)
+        if wait_time > 0:
+            time.sleep(wait_time / 1e6)  # sleep 1-5 us possion distributed
+        operation()
         stream.synchronize()
+        cnt += 1
+    stream.synchronize()
 
     print(f"{name}: {cnt}")
 
