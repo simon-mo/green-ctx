@@ -2,8 +2,8 @@ digraph dot {
 subgraph cluster_4 {
 label="graph_4" graph[style="dashed"];
 "graph_4_node_0"[style="bold" shape="record" label="{KERNEL
-| {ID | 0 (topoId: 3) | switch_handle_setter\<\<\<1,1,0\>\>\>}
-| {{node handle | func handle} | {0x000000003B521868 | 0x000000003BAD4F60}}
+| {ID | 0 (topoId: 1) | switch_handle_setter\<\<\<1,1,0\>\>\>}
+| {{node handle | func handle} | {0x000000001FB58B18 | 0x00000000200FA280}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}
@@ -11,8 +11,8 @@ label="graph_4" graph[style="dashed"];
 
 "graph_4_node_1"[style="bold" shape="record" label="{
 CONDITIONAL
-| {ID | 1 (topoId: 1)}
-| {node handle| 0x000000003B521160}
+| {ID | 1 (topoId: 0)}
+| {node handle| 0x000000001FB58410}
 | {Conditional Handle|1}
 | {Conditional Type| SWITCH}
 | {0|  graph_5}
@@ -23,27 +23,13 @@ CONDITIONAL
 }
 "];
 
-"graph_4_node_2"[style="solid" shape="rectangle" label="2 (topoId: 2)
-EVENT_RECORD
-node handle: 0x000000003B520A58
-event: 0x000000003B954450
-"];
-
-"graph_4_node_3"[style="solid" shape="rectangle" label="3 (topoId: 0)
-EVENT_RECORD
-node handle: 0x000000003B51E028
-event: 0x0000000035DCF8E0
-"];
-
 "graph_4_node_0" -> "graph_4_node_1" [headlabel=0];
-"graph_4_node_0" -> "graph_4_node_2" [headlabel=0];
-"graph_4_node_2" -> "graph_4_node_3" [headlabel=0];
 }
 subgraph cluster_5 {
 label="graph_5" graph[style="dashed"];
 "graph_5_node_0"[style="bold" shape="record" label="{KERNEL
 | {ID | 0 (topoId: 0) | sm90_xmma_gemm_bf16bf16_bf16f32_f32_nn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas\<\<\<\{32,2\},384,231424\>\>\>}
-| {{node handle | func handle} | {0x000000003B520350 | 0x000000003A75E9D0}}
+| {{node handle | func handle} | {0x000000001FB57D08 | 0x000000001ED960B0}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}
@@ -54,7 +40,7 @@ subgraph cluster_6 {
 label="graph_6" graph[style="dashed"];
 "graph_6_node_0"[style="bold" shape="record" label="{KERNEL
 | {ID | 0 (topoId: 0) | sm90_xmma_gemm_bf16bf16_bf16f32_f32_nn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas\<\<\<\{32,2\},384,231424\>\>\>}
-| {{node handle | func handle} | {0x000000003B51FC48 | 0x000000003A75E9D0}}
+| {{node handle | func handle} | {0x000000001FB57600 | 0x000000001ED960B0}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}
@@ -65,7 +51,7 @@ subgraph cluster_7 {
 label="graph_7" graph[style="dashed"];
 "graph_7_node_0"[style="bold" shape="record" label="{KERNEL
 | {ID | 0 (topoId: 0) | sm90_xmma_gemm_bf16bf16_bf16f32_f32_nn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas\<\<\<\{32,2\},384,231424\>\>\>}
-| {{node handle | func handle} | {0x000000003B51F540 | 0x000000003A75E9D0}}
+| {{node handle | func handle} | {0x000000001FB56EF8 | 0x000000001ED960B0}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}
@@ -76,7 +62,7 @@ subgraph cluster_8 {
 label="graph_8" graph[style="dashed"];
 "graph_8_node_0"[style="bold" shape="record" label="{KERNEL
 | {ID | 0 (topoId: 0) | sm90_xmma_gemm_bf16bf16_bf16f32_f32_nn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas\<\<\<\{32,2\},384,231424\>\>\>}
-| {{node handle | func handle} | {0x000000003B51EE38 | 0x000000003A75E9D0}}
+| {{node handle | func handle} | {0x000000001FB567F0 | 0x000000001ED960B0}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}
@@ -87,7 +73,7 @@ subgraph cluster_9 {
 label="graph_9" graph[style="dashed"];
 "graph_9_node_0"[style="bold" shape="record" label="{KERNEL
 | {ID | 0 (topoId: 0) | sm90_xmma_gemm_bf16bf16_bf16f32_f32_nn_n_tilesize128x128x64_warpgroupsize1x1x1_execute_segment_k_off_kernel__5x_cublas\<\<\<\{32,2\},384,231424\>\>\>}
-| {{node handle | func handle} | {0x000000003B51E730 | 0x000000003A75E9D0}}
+| {{node handle | func handle} | {0x000000001FB560E8 | 0x000000001ED960B0}}
 | {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
 | {cooperative | 0}
 | {priority | 0}

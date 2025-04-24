@@ -9,3 +9,6 @@ profile:
         --capture-range=cudaProfilerApi \
         -x true \
         python two-llms.py
+
+graph-vis:
+    dot -Tpng debug_dump.txt -o graph.png
