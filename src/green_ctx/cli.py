@@ -33,7 +33,7 @@ def status(host: str = typer.Option("localhost", help="Server host"),
            port: int = typer.Option(50051, help="Server port")):
     """Check the status of the GPU multiplexer server."""
     try:
-        client = GPUClient(host=host, port=port)
+        client = GPUClient(model_name="cli", host=host, port=port)
         status = client.health_check()
 
         table = Table(title="GPU Multiplexer Status")

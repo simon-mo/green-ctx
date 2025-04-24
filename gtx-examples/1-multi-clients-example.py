@@ -14,7 +14,7 @@ from green_ctx.client.client import GPUClient
 
 def main(mp_barrier: mp.Barrier):
     # Create a client connection
-    client = GPUClient(host="localhost", port=50051)
+    client = GPUClient(model_name="example", host="localhost", port=50051)
 
     torch.set_default_device("cuda")
 

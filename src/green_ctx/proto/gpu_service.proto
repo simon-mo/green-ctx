@@ -107,7 +107,9 @@ message UnlockTensorResponse {
 }
 
 message KVPoolInitRequest {
-  int32 total_num_blocks = 1;
+  string model_name = 1;
+  int32 total_num_blocks = 2;
+  int32 kv_block_bytes = 3;
 }
 
 message KVPoolInitResponse {
@@ -115,7 +117,8 @@ message KVPoolInitResponse {
 }
 
 message KVPoolAllocRequest {
-  int32 num_blocks = 1;
+  string model_name = 1;
+  int32 num_blocks = 2;
 }
 
 message KVPoolAllocResponse {
@@ -123,7 +126,8 @@ message KVPoolAllocResponse {
 }
 
 message KVPoolFreeRequest {
-  repeated int32 blocks = 1;
+  string model_name = 1;
+  repeated int32 blocks = 2;
 }
 
 message KVPoolFreeResponse {
