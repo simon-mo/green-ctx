@@ -22,6 +22,7 @@ DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
     "float16": torch.float16,
     "float32": torch.float32,
+    "float8_e4m3fn": torch.float8_e4m3fn,
 }
 
 @dataclass
@@ -44,6 +45,7 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
         self.global_lock = Lock()
         self.kv_pool = None
         self.kv_pool_lock = Lock()
+        self.block_buffer_size = 16
 
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
 
@@ -228,9 +230,18 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             context.abort(grpc.StatusCode.INVALID_ALLOC_REQUEST,
                           f"Cannot allocate {num_blocks} blocks.")
 
+        single_block = num_blocks == 1
+        if single_block:
+            num_blocks = self.block_buffer_size
+
         with self.kv_pool_lock:
             if num_blocks > len(self.kv_pool):
-                return gpu_service_pb2.KVPoolAllocResponse(blocks=[])
+                if single_block and len(self.kv_pool) > 0:
+                    block = [self.kv_pool.pop()]
+                    logger.info(f"KV pool allocated blocks: {block}")
+                    return gpu_service_pb2.KVPoolAllocResponse(blocks=block)
+                else:
+                    return gpu_service_pb2.KVPoolAllocResponse(blocks=[])
 
             blocks = [self.kv_pool.pop() for _ in range(num_blocks)]
             logger.info(f"KV pool allocated blocks: {blocks}")
@@ -242,6 +253,7 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             logger.info(f"KV pool freeing blocks: {request.blocks}")
             for block_id in request.blocks:
                 if block_id in self.kv_pool:
+                    logger.info(f"Block {block_id} is already freed.")
                     context.abort(grpc.StatusCode.DOUBLE_FREE,
                                   f"Block {block_id} is already freed.")
                 self.kv_pool.add(block_id)
