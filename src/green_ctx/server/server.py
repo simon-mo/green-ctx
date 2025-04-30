@@ -51,6 +51,7 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
 
         self.kv_pool: Optional[KVCachePool] = None
         self.kv_pool_lock = Lock()
+        self.request_rate = 0
 
         logger.info(f"Initializing GPU server with {self.total_sms} SMs")
 
@@ -64,7 +65,8 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             status="healthy",
             total_sms=self.total_sms,
             available_sms=self.available_sms,
-            num_tensors=len(self.tensors))
+            num_tensors=len(self.tensors),
+            request_rate=self.request_rate)
 
     def RequestExclusiveSMs(self, request, context):
         """Allocate exclusive SMs to a client."""
@@ -269,6 +271,11 @@ class GPUServicer(gpu_service_pb2_grpc.GPUServiceServicer):
             self.kv_pool.free(request.model_name, request.blocks)
 
         return gpu_service_pb2.KVPoolFreeResponse(success=True)
+
+    def ReportRequestRate(self, request, context):
+        """Report the request rate for the server."""
+        self.request_rate = request.request_rate
+        return gpu_service_pb2.RequestRateResponse(success=True)
 
 
 class GPUServer:

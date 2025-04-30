@@ -42,7 +42,8 @@ class GPUClient:
             "status": response.status,
             "total_sms": response.total_sms,
             "available_sms": response.available_sms,
-            "num_tensors": response.num_tensors
+            "num_tensors": response.num_tensors,
+            "request_rate": response.request_rate,
         }
 
     def request_exclusive_SMs(self, num_sms: int) -> tuple[str, GreenContext]:
@@ -168,6 +169,13 @@ class GPUClient:
         response = self.stub.KVPoolFree(request)
         return response.success
 
+    def update_request_rate(self, rate: int) -> bool:
+        """Update the request rate for the model."""
+        request = gpu_service_pb2.UpdateRequestRateRequest(
+            model_name=self.model_name, rate=rate)
+        response = self.stub.UpdateRequestRate(request)
+        return response.success
+    
     def close(self):
         """Close the connection to the server."""
         for name in list(self.anon_tensors):

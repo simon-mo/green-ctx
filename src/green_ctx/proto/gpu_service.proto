@@ -21,6 +21,7 @@ service GPUService {
   rpc KVPoolInit(KVPoolInitRequest) returns (KVPoolInitResponse) {}
   rpc KVPoolAlloc(KVPoolAllocRequest) returns (KVPoolAllocResponse) {}
   rpc KVPoolFree(KVPoolFreeRequest) returns (KVPoolFreeResponse) {}
+  rpc ReportRequestRate(UpdateRequest) returns (RequestRateResponse) {}
 }
 
 // Health check messages
@@ -31,6 +32,7 @@ message HealthCheckResponse {
   int32 total_sms = 2;
   int32 available_sms = 3;
   int32 num_tensors = 4;
+  int32 request_rate = 5;
 }
 
 // SM management messages
@@ -131,5 +133,13 @@ message KVPoolFreeRequest {
 }
 
 message KVPoolFreeResponse {
+  bool success = 1;
+}
+
+message UpdateRequest {
+  int32 request_rate = 1;
+}
+
+message RequestRateResponse {
   bool success = 1;
 }
