@@ -1,0 +1,11 @@
+list:
+    @just --list
+
+build:
+    #! /bin/bash
+    pushd nvbit_release/tools/opcode_hist
+    make -j
+    popd
+
+run:
+    CUDA_INJECTION64_PATH=nvbit_release/tools/opcode_hist/opcode_hist.so python run-torch.py

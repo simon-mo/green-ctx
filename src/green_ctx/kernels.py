@@ -182,13 +182,12 @@ typedef unsigned long long uint64_t;
 
 extern "C" __global__ void __barrier(uint64_t *d_value, uint64_t target_value, unsigned int sleep_time_ns) {
     atomicAdd(d_value, 1);
-    __threadfence_system();  // Force visibility of our update
 
     while (true) {
         // Read the value using atomic operation to bypass cache
         uint64_t current_value = atomicAdd(d_value, 0);  // Atomic read without modifying
 
-        if (current_value == target_value) {
+        if (current_value >= target_value) {
             break;
         }
 
@@ -202,7 +201,7 @@ def run_barrier_kernel(d_ptr, target_value, sleep_time_ns, stream=None):
     kernel = compile_kernel(wait_code, "__barrier")
     d_ptr_arg = np.array([d_ptr.data_ptr()], dtype=np.uint64)
     target_value_arg = np.array([target_value], dtype=np.uint64)
-    sleep_time_ns_arg = np.array([sleep_time_ns], dtype=np.uint64)
+    sleep_time_ns_arg = np.array([sleep_time_ns], dtype=np.uint32)
     args = np.array([
         d_ptr_arg.ctypes.data, target_value_arg.ctypes.data,
         sleep_time_ns_arg.ctypes.data

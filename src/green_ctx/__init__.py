@@ -8,8 +8,8 @@ from contextlib import contextmanager
 import math
 from functools import cached_property
 import os
-
-from .utils import CHECK_CUDA, set_cublas_sm_count
+from functools import lru_cache
+from .utils import CHECK_CUDA, set_cublas_sm_count, set_vllm_flash_attn_sm_count
 
 device = None
 
@@ -37,12 +37,13 @@ class GreenContext:
     primary_context: Any = None
 
     raw_stream: Any = None
-    raw_stream_id: int = 0
+    raw_stream_id: int = -1
 
     @contextmanager
     def with_context(self):
         cuda.cuCtxPushCurrent(self.primary_context)
-        with set_cublas_sm_count(self.sm_count):
+        with set_cublas_sm_count(self.sm_count), set_vllm_flash_attn_sm_count(
+                self.sm_count):
             yield
         cuda.cuCtxPopCurrent()
 
@@ -138,6 +139,7 @@ def get_sms_in_range(start: int,
     return gc
 
 
+@lru_cache(maxsize=None)
 def get_sms_by_spec(num_groups: int,
                     min_size: int,
                     indices: List[int],
@@ -180,10 +182,16 @@ def get_sms_by_spec(num_groups: int,
     return gc
 
 
+@lru_cache(maxsize=None)
+def make_shard_cached(sm_request: int, resource_idx: int = 0) -> GreenContext:
+    return make_shard(sm_request, resource_idx)
+
+
 def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
-    assert (
-        sm_request >= 8 and sm_request % 8 == 0
-    ), "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
+    if sm_request != 132:
+        assert (
+            sm_request >= 8 and sm_request % 8 == 0
+        ), "On Compute Architecture 9.0+: The minimum count is 8 SMs and must be a multiple of 8."
 
     # Get SM resource
     sm_resource = CHECK_CUDA(

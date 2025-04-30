@@ -180,3 +180,12 @@ pyrightconfig.json
 *.qdstrm
 *.out
 *.png
+*.ncu-rep
+
+*.o
+vectoradd
+
+# Local vLLM clone
+vllm/
+*.sqlite
+

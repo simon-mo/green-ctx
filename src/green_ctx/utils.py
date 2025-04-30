@@ -37,13 +37,26 @@ def set_cublas_sm_count(sm_count: Optional[int] = None):
         set_sm_count_target(handle, old_sm_count)
 
 
+@contextmanager
+def set_vllm_flash_attn_sm_count(sm_count: Optional[int] = None):
+    if sm_count is None:
+        yield
+        return
+
+    from vllm.v1.attention.backends.flash_attn import sm_margin, set_sm_margin
+
+    old_sm_margin = sm_margin
+    set_sm_margin(132 - sm_count)
+    try:
+        yield
+    finally:
+        set_sm_margin(old_sm_margin)
+
+
 def CHECK_CUDA(result):
     if result[0].value:
-        raise RuntimeError(
-            "CUDA error code={}({})".format(
-                result[0].value, _cudaGetErrorEnum(result[0])
-            )
-        )
+        raise RuntimeError("CUDA error code={}({})".format(
+            result[0].value, _cudaGetErrorEnum(result[0])))
     if len(result) == 1:
         return None
     elif len(result) == 2:
