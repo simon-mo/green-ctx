@@ -171,9 +171,8 @@ class GPUClient:
 
     def update_request_rate(self, rate: int) -> bool:
         """Update the request rate for the model."""
-        request = gpu_service_pb2.UpdateRequestRateRequest(
-            model_name=self.model_name, rate=rate)
-        response = self.stub.UpdateRequestRate(request)
+        request = gpu_service_pb2.UpdateRequest(request_rate=rate)
+        response = self.stub.ReportRequestRate(request)
         return response.success
     
     def close(self):
