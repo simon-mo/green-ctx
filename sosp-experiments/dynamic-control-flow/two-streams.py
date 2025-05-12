@@ -3,8 +3,10 @@ from threading import Barrier, Event, Thread
 import time
 import numpy as np
 from itertools import cycle
-from green_ctx import get_sms_by_spec, GreenContext
+from green_ctx import get_sms_by_spec, GreenContext, make_shard
 from contextlib import nullcontext
+
+from switch_lib import wrap_op_with_switch
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.bfloat16)
@@ -48,22 +50,37 @@ def memory_operation():
 
 def main():
     # init and warm up
-    a @ b
+    with make_shard(132).with_context():
+        a @ b
     torch.cuda.synchronize()
 
     barrier = Barrier(3)
     stop_event = Event()
 
-    compute_ctx = get_sms_by_spec(4, 32, (0, 1, 2),
-                                  get_remainder=False)  # 96 SMs
-    memory_ctx = get_sms_by_spec(4, 32, (3, ), get_remainder=False)  # 32 SMs
+    # compute_ctx = get_sms_by_spec(4, 32, (0, 1, 2),
+    #                               get_remainder=False)  # 96 SMs
+    # memory_ctx = get_sms_by_spec(4, 32, (3, ), get_remainder=False)  # 32 SMs
+
+    compute_graph = wrap_op_with_switch(compute_operation, 8)
+    memory_graph = wrap_op_with_switch(memory_operation, 8)
+
+    compute_graph.debug_dump("./compute_graph.txt")
+    memory_graph.debug_dump("./memory_graph.txt")
+
+    def compute_op_graph():
+        compute_graph.replay()
+
+    def memory_op_graph():
+        memory_graph.replay()
+
+    torch.cuda.cudart().cudaProfilerStart()
 
     compute_thread = Thread(target=worker_thread,
-                            args=(compute_operation, "compute_bound_thread",
-                                  barrier, stop_event, compute_ctx))
+                            args=(compute_op_graph, "compute_bound_thread",
+                                  barrier, stop_event, None))
     memory_thread = Thread(target=worker_thread,
-                           args=(memory_operation, "memory_bound_thread",
-                                 barrier, stop_event, memory_ctx))
+                           args=(memory_op_graph, "memory_bound_thread",
+                                 barrier, stop_event, None))
     compute_thread.start()
     memory_thread.start()
 
@@ -73,6 +90,8 @@ def main():
     stop_event.set()
 
     torch.cuda.synchronize()
+
+    torch.cuda.cudart().cudaProfilerStop()
 
     compute_thread.join()
     memory_thread.join()

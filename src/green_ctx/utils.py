@@ -1,4 +1,4 @@
-from cuda import cuda, nvrtc
+from cuda import cuda, nvrtc, cudart
 from nvmath.bindings.cublas import get_sm_count_target, set_sm_count_target
 import torch
 from contextlib import contextmanager
@@ -63,3 +63,16 @@ def CHECK_CUDA(result):
         return result[1]
     else:
         return result[1:]
+
+
+def CHECK_CUDART(call_result):
+    if len(call_result) == 2:
+        err, result = call_result
+    elif len(call_result) > 2:
+        err, *result = call_result
+    else:
+        err, = call_result
+        result = None
+    if err != cudart.cudaError_t.cudaSuccess:
+        raise RuntimeError(f"CUDA error: {err}")
+    return result

@@ -189,3 +189,4 @@ vectoradd
 # vllm/
 *.sqlite
 
+cuda-samples/

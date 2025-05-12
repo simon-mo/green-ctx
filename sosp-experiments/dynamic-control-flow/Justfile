@@ -12,3 +12,7 @@ profile:
 
 graph-vis:
     dot -Tpng debug_dump.txt -o graph.png
+
+graph-vis-dcf:
+    dot -Tpng compute_graph.txt -o compute_graph.png
+    dot -Tpng memory_graph.txt -o memory_graph.png
