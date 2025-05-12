@@ -27,6 +27,9 @@ class GPUClient:
 
         self.anon_tensors = set()
 
+        self.block_buffer: List[int] = []
+        self.block_buffer_size = 16  # TODO: find optimal buffer size
+
     def health_check(self) -> Dict[str, any]:
         """Check server health status."""
         response = self.stub.HealthCheck(gpu_service_pb2.HealthCheckRequest())
@@ -116,6 +119,17 @@ class GPUClient:
 
     def kv_pool_alloc(self, num_blocks: int) -> List[int]:
         """Allocate blocks from KV pool."""
+        # cache blocks to reduce number of RPC calls for decode allocations
+        if num_blocks == 1:
+            if len(self.block_buffer) == 0:
+                # server tries to allocate buffer_size blocks or 1 block
+                request = gpu_service_pb2.KVPoolAllocRequest(num_blocks=1)
+                response = self.stub.KVPoolAlloc(request)
+                if len(response.blocks) == 0:
+                    return []
+                self.block_buffer = list(response.blocks)
+            return [self.block_buffer.pop()]
+
         request = gpu_service_pb2.KVPoolAllocRequest(num_blocks=num_blocks)
         response = self.stub.KVPoolAlloc(request)
         return list(response.blocks)
