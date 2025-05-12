@@ -1,0 +1,25 @@
+list:
+    @just --list
+
+kernel-trace-per-nvtx:
+    #!/usr/bin/env bash
+    set -ex
+    nsys stats --report nvtx_sum report.nsys-rep --format json --output /tmp/list --force-overwrite
+    cat /tmp/list_nvtx_sum.json | jq --raw-output '.[] | .Range | sub("^:"; "")' > /tmp/list_nvtx_sum.txt
+
+    for range in $(cat /tmp/list_nvtx_sum.txt); do
+        echo "Processing range: $range"
+        nsys stats --report cuda_kern_exec_trace --filter-nvtx $range --format csv --output profile-dir/ report.nsys-rep
+    done
+
+profile:
+    nsys profile -o report.nsys-rep --trace-fork-before-exec=true --cuda-graph-trace=node python run-sample-workload.py
+
+clean:
+    rm -f profile-dir/*
+    rm -f report.nsys-rep
+    rm -f report.sqlite
+
+run: clean
+    just profile
+    just kernel-trace-per-nvtx

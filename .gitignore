@@ -187,3 +187,4 @@ vectoradd
 
 # Local vLLM clone
 # vllm/
+*.sqlite
