@@ -1,3 +1,6 @@
+# This script is to use to show case the ability to leverage CUDA dynamic control flow
+# to select different kernels under SM constraints using switch node.
+
 import torch
 from green_ctx.utils import set_cublas_sm_count
 from cuda import cuda, cudart  # Import CUDA driver API
@@ -25,6 +28,8 @@ def CHECK_CUDA(call_result):
 def CHECK_CUDART(call_result):
     if len(call_result) == 2:
         err, result = call_result
+    elif len(call_result) > 2:
+        err, *result = call_result
     else:
         err, = call_result
         result = None
@@ -51,6 +56,22 @@ SM_COUNTS = [8, 16, 32, 64, 128]
 # warmup
 torch.matmul(A, B)
 torch.cuda.synchronize()
+print("--------------------")
+
+for sm_count in SM_COUNTS:
+    with set_cublas_sm_count(sm_count):
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        for _ in range(1):
+            torch.matmul(A, B)
+        end_event.record()
+        torch.cuda.synchronize()
+        print(
+            f"SM count: {sm_count}, time taken: {start_event.elapsed_time(end_event)/1:.4f} ms"
+        )
+
+print("--------------------")
 
 # # Create CUDA event handles using the driver API
 cuda_event_pairs = []
@@ -98,8 +119,10 @@ for start_event, end_event in cuda_event_pairs:
     CHECK_CUDA(cuda.cuEventDestroy(start_event))
     CHECK_CUDA(cuda.cuEventDestroy(end_event))
 
+# Section above always works, and is the baseline.
 # --------------------------------------------
 # Now we implement the switch graph
+print("--------------------")
 
 from green_ctx.kernels import compile_kernel
 import numpy as np
@@ -113,18 +136,19 @@ void switch_handle_setter(char *dPtr, cudaGraphConditionalHandle handle)
 {
     unsigned int value = *dPtr;
     cudaGraphSetConditional(handle, value);
-    printf("GPU: Handle set to %d\n", value);
 }
 """
+# nts: this seems to take about 10us.
 switch_handle_setter_kernel = compile_kernel(kernel_string,
                                              "switch_handle_setter")
 
 select_buf = torch.ones(1, dtype=torch.int32, device="cuda")
-start_event, = CHECK_CUDA(cuda.cuEventCreate(0))
-end_event, = CHECK_CUDA(cuda.cuEventCreate(0))
+start_event, end_event = torch.cuda.Event(
+    enable_timing=True), torch.cuda.Event(enable_timing=True)
 
 graph = torch.cuda.CUDAGraph()
-graph.enable_debug_mode()
+# graph.enable_debug_mode()
+
 stream = torch.cuda.Stream()
 with torch.cuda.stream(stream):
     graph.capture_begin()
@@ -175,32 +199,33 @@ with torch.cuda.stream(stream):
         cudart.cudaGraphAddNode(graph_handle, dependencies, len(dependencies),
                                 cond_node_params))
 
-    CHECK_CUDA(cuda.cuEventRecordWithFlags(start_event, stream_handle,
-                                           1))  # Use flag 1
-
     # 3. For each SM count, add a kernel node
+    # Use a separate stream for sub-graph capture
     body_stream = torch.cuda.Stream()
-
     with torch.cuda.stream(body_stream):
         for i, sm_count in enumerate(SM_COUNTS):
+            subgraph = cond_node_params.conditional.phGraph_out[i]
             CHECK_CUDART(
                 cudart.cudaStreamBeginCaptureToGraph(
-                    body_stream.cuda_stream,
-                    cond_node_params.conditional.phGraph_out[i], None, None, 0,
+                    body_stream.cuda_stream, subgraph, None, None, 0,
                     cudart.cudaStreamCaptureMode.cudaStreamCaptureModeGlobal))
-            set_cublas_sm_count(sm_count)
-            torch.matmul(A, B)
+            with set_cublas_sm_count(sm_count):
+                torch.matmul(A, B)
             CHECK_CUDART(cudart.cudaStreamEndCapture(body_stream.cuda_stream))
 
-    CHECK_CUDA(cuda.cuEventRecordWithFlags(end_event, stream_handle,
-                                           1))  # Use flag 1
-
     graph.capture_end()
-graph.debug_dump("./debug_dump.txt")
+
+# graph.debug_dump("./debug_dump.txt")
 # 4. Instantiate the graph
 for i in range(len(SM_COUNTS)):
     select_buf[0] = i
-    graph.replay()
     torch.cuda.synchronize()
-    time_ms, = CHECK_CUDA(cuda.cuEventElapsedTime(start_event, end_event))
-    print(f"SM count: {SM_COUNTS[i]}, time taken: {time_ms:.4f} ms")
+
+    start_event.record()
+    for _ in range(1):
+        graph.replay()
+    end_event.record()
+    torch.cuda.synchronize()
+    print(
+        f"SM count: {SM_COUNTS[i]}, time taken: {start_event.elapsed_time(end_event)/1:.4f} ms"
+    )

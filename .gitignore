@@ -188,3 +188,6 @@ vectoradd
 # Local vLLM clone
 # vllm/
 *.sqlite
+*.sqlite
+
+cuda-samples/

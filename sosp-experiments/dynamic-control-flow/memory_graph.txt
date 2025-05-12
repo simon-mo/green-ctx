@@ -1,0 +1,69 @@
+digraph dot {
+subgraph cluster_13 {
+label="graph_13" graph[style="dashed"];
+"graph_13_node_0"[style="bold" shape="record" label="{KERNEL
+| {ID | 0 (topoId: 1) | switch_handle_setter\<\<\<1,1,0\>\>\>}
+| {{node handle | func handle} | {0x000000004E03E470 | 0x000000003E08EB40}}
+| {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
+| {cooperative | 0}
+| {priority | 0}
+}"];
+
+"graph_13_node_1"[style="bold" shape="record" label="{
+CONDITIONAL
+| {ID | 1 (topoId: 0)}
+| {node handle| 0x000000004E03EB78}
+| {Conditional Handle|1}
+| {Conditional Type| SWITCH}
+| {0|  graph_14}
+| {1|  graph_15}
+| {2|  graph_16}
+}
+"];
+
+"graph_13_node_0" -> "graph_13_node_1" [headlabel=0];
+}
+subgraph cluster_14 {
+label="graph_14" graph[style="dashed"];
+}
+subgraph cluster_15 {
+label="graph_15" graph[style="dashed"];
+"graph_15_node_0"[style="bold" shape="record" label="{KERNEL
+| {ID | 0 (topoId: 1) | _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_15CUDAFunctor_addIN3c108BFloat16EEESt5arrayIPcLm3EEEEviT0_T1_\<\<\<16384,128,0\>\>\>}
+| {{node handle | func handle} | {0x000000004E03F280 | 0x0000000046571F30}}
+| {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
+| {cooperative | 0}
+| {priority | 0}
+}"];
+
+"graph_15_node_1"[style="bold" shape="record" label="{KERNEL
+| {ID | 1 (topoId: 0) | exit_kernel\<\<\<1,1,0\>\>\>}
+| {{node handle | func handle} | {0x000000004E03F988 | 0x000000003DC185F0}}
+| {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
+| {cooperative | 0}
+| {priority | 0}
+}"];
+
+"graph_15_node_0" -> "graph_15_node_1" [headlabel=0];
+}
+subgraph cluster_16 {
+label="graph_16" graph[style="dashed"];
+"graph_16_node_0"[style="bold" shape="record" label="{KERNEL
+| {ID | 0 (topoId: 1) | _ZN2at6native29vectorized_elementwise_kernelILi4ENS0_15CUDAFunctor_addIN3c108BFloat16EEESt5arrayIPcLm3EEEEviT0_T1_\<\<\<16384,128,0\>\>\>}
+| {{node handle | func handle} | {0x000000004E040090 | 0x0000000046571F30}}
+| {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
+| {cooperative | 0}
+| {priority | 0}
+}"];
+
+"graph_16_node_1"[style="bold" shape="record" label="{KERNEL
+| {ID | 1 (topoId: 0) | exit_kernel\<\<\<1,1,0\>\>\>}
+| {{node handle | func handle} | {0x000000004E040798 | 0x000000003DC185F0}}
+| {accessPolicyWindow | {base_ptr | num_bytes | hitRatio | hitProp | missProp} | {0x0000000000000000 | 0 | 0.000000 | N | N}}
+| {cooperative | 0}
+| {priority | 0}
+}"];
+
+"graph_16_node_0" -> "graph_16_node_1" [headlabel=0];
+}
+}
