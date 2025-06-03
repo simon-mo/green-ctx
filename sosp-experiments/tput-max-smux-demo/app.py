@@ -1,14 +1,14 @@
 # if you want best tput for a given kernel, you might as well squeeze it and launch of 8x to fully max out things.
 
 import torch
+import rich
 
 torch.set_default_device("cuda")
 torch.set_default_dtype(torch.bfloat16)
 
-M, K, N = 14336, 4096, 2048
-
-A = torch.randn(M, K, dtype=torch.bfloat16)
-B = torch.randn(K, N, dtype=torch.bfloat16)
+M, K = 14336, 4096
+# N_values = [8, 32, 64, 512, 2048, 8192, 16384]
+N_values = [64]
 
 
 def do_bench(fn):
@@ -25,45 +25,60 @@ def do_bench(fn):
     return sum(timings) / len(timings)
 
 
-def torch_gemm():
-    for _ in range(10):
+def torch_gemm(A, B):
+    for _ in range(200):
         C = torch.matmul(A, B)
 
 
-print(f"torch runtime: {do_bench(torch_gemm)}")
-
-# capture 2 graph, each with a 64 gtx
-from green_ctx import make_shard
-
-first_half = make_shard(64, 0)
-second_half = make_shard(64, 1)
-
-with first_half.with_context():
-    first_graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(first_graph):
-        for _ in range(10):
-            C = torch.matmul(A, B)
-
-with second_half.with_context():
-    second_graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(second_graph):
-        for _ in range(10):
-            C = torch.matmul(A, B)
-
-print(f"first graph: {do_bench(lambda: first_graph.replay())}")
-print(f"second graph: {do_bench(lambda: second_graph.replay())}")
-
-s1 = torch.cuda.Stream()
-s2 = torch.cuda.Stream()
+def run_together(graphs, streams, events):
+    for i, (graph, stream, event) in enumerate(zip(graphs, streams, events)):
+        with torch.cuda.stream(stream):
+            graph.replay()
+            event.record()
+    for event in events:
+        event.wait()
 
 
-def run_together():
-    with torch.cuda.stream(s1):
-        first_graph.replay()
-    with torch.cuda.stream(s2):
-        second_graph.replay()
+for N in N_values:
+    A = torch.randn(M, K, dtype=torch.bfloat16)
+    B = torch.randn(K, N, dtype=torch.bfloat16)
+    torch_gemm(A, B)
 
+    # Benchmark torch runtime
+    torch_gemm_graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(torch_gemm_graph):
+        torch_gemm(A, B)
+    torch_time = do_bench(lambda: torch_gemm_graph.replay())
 
-# TODO fix the timing here so we can demonstrate the point of tput optimial packing is the squeezing apporahc.
+    # Setup shards and graphs
+    from green_ctx import make_shard
+    shards = [make_shard(32, i, add_remainder=(i == 3)) for i in range(4)]
+    graphs = []
+    events = [torch.cuda.Event(enable_timing=False) for _ in range(4)]
+    streams = [torch.cuda.Stream() for _ in range(4)]
 
-print(f"run together: {do_bench(run_together)}")
+    # Create graphs
+    for i, shard in enumerate(shards):
+        with shard.with_torch_stream() as stream:
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream):
+                for _ in range(50):
+                    C = torch.matmul(A, B)
+            graphs.append(graph)
+
+    graph_1_time = do_bench(lambda: graphs[0].replay())
+    graph_2_time = do_bench(lambda: graphs[1].replay())
+    graph_3_time = do_bench(lambda: graphs[2].replay())
+    graph_4_time = do_bench(lambda: graphs[3].replay())
+    graph_time_avg = (graph_1_time + graph_2_time + graph_3_time +
+                      graph_4_time) / 4
+
+    # Benchmark running together
+    together_time = do_bench(lambda: run_together(graphs, streams, events))
+
+    rich.print(
+        f"N: {N}, torch: {torch_time:.2f} ms, graph avg: {graph_time_avg:.2f} ms, four-multiplexed: {together_time:.2f} ms, 4 streams are {(torch_time - together_time) * 100 / torch_time:.2f} % faster than torch"
+    )
+    print(
+        f"N: {N}, per op torch: {torch_time/200*1000:.2f} us, graph avg: {graph_time_avg/50*1000:.2f} us, four-multiplexed: {together_time/200*1000:.2f} us, 4 streams are {(torch_time - together_time) * 100 / torch_time:.2f} % faster than torch"
+    )

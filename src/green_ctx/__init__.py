@@ -65,7 +65,8 @@ class GreenContext:
     @contextmanager
     def with_torch_stream(self):
         stream = torch.cuda.ExternalStream(int(self.make_stream()))
-        with torch.cuda.stream(stream):
+        with set_cublas_sm_count(self.sm_count), set_vllm_flash_attn_sm_count(
+                self.sm_count), torch.cuda.stream(stream):
             yield stream
 
     @cached_property
@@ -183,11 +184,15 @@ def get_sms_by_spec(num_groups: int,
 
 
 @lru_cache(maxsize=None)
-def make_shard_cached(sm_request: int, resource_idx: int = 0) -> GreenContext:
-    return make_shard(sm_request, resource_idx)
+def make_shard_cached(sm_request: int,
+                      resource_idx: int = 0,
+                      add_remainder: bool = False) -> GreenContext:
+    return make_shard(sm_request, resource_idx, add_remainder)
 
 
-def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
+def make_shard(sm_request: int,
+               resource_idx: int = 0,
+               add_remainder: bool = False) -> GreenContext:
     if sm_request != 132:
         assert (
             sm_request >= 8 and sm_request % 8 == 0
@@ -220,8 +225,11 @@ def make_shard(sm_request: int, resource_idx: int = 0) -> GreenContext:
     # print(f"Remaining SMs: {remaining.sm.smCount}")
     # print(f"Resource idx: {resource_idx}")
 
-    desc = CHECK_CUDA(
-        cuda.cuDevResourceGenerateDesc([result_resources[resource_idx]], 1))
+    resources = [result_resources[resource_idx]]
+    if add_remainder:
+        resources.append(remaining)
+    desc = CHECK_CUDA(cuda.cuDevResourceGenerateDesc(resources,
+                                                     len(resources)))
     green_ctx = CHECK_CUDA(
         cuda.cuGreenCtxCreate(
             desc, device,
